@@ -79,6 +79,17 @@ func IsGroupMember(groupID, userID int) (bool, error) {
 	return n > 0, err
 }
 
+// DeleteGroup removes a group and its membership rows. Games that referenced the
+// group keep their (now-orphaned) group_id, which is only optional context, so
+// existing games are unaffected. The caller must verify ownership first.
+func DeleteGroup(groupID int) error {
+	if _, err := database.DB.Exec("DELETE FROM group_members WHERE group_id = ?", groupID); err != nil {
+		return err
+	}
+	_, err := database.DB.Exec("DELETE FROM groups WHERE id = ?", groupID)
+	return err
+}
+
 // GetGroupMembers returns the approved users in a group.
 func GetGroupMembers(groupID int) ([]*User, error) {
 	return queryUsers(`

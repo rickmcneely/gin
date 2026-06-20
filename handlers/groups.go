@@ -62,6 +62,29 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, g)
 }
 
+// DeleteGroup removes a group the current user owns.
+func DeleteGroup(w http.ResponseWriter, r *http.Request) {
+	groupID, err := strconv.Atoi(mux.Vars(r)["id"])
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid group id")
+		return
+	}
+	g, err := models.GetGroupByID(groupID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "group not found")
+		return
+	}
+	if g.OwnerID != UserFrom(r).ID {
+		writeError(w, http.StatusForbidden, "only the group's owner can delete it")
+		return
+	}
+	if err := models.DeleteGroup(groupID); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not delete group")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
 // AddGroupMember adds a player to a group the current user belongs to.
 func AddGroupMember(w http.ResponseWriter, r *http.Request) {
 	groupID, err := strconv.Atoi(mux.Vars(r)["id"])

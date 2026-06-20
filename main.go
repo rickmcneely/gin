@@ -35,6 +35,8 @@ func main() {
 	api.HandleFunc("/groups", handlers.PlayerOnly(handlers.ListGroups)).Methods("GET")
 	api.HandleFunc("/groups", handlers.PlayerOnly(handlers.CreateGroup)).Methods("POST")
 	api.HandleFunc("/groups/{id}/members", handlers.PlayerOnly(handlers.AddGroupMember)).Methods("POST")
+	api.HandleFunc("/groups/{id}/invite", handlers.PlayerOnly(srv.InviteGroup)).Methods("POST")
+	api.HandleFunc("/groups/{id}", handlers.PlayerOnly(handlers.DeleteGroup)).Methods("DELETE")
 	api.HandleFunc("/games", handlers.PlayerOnly(srv.ListGames)).Methods("GET")
 	api.HandleFunc("/games", handlers.PlayerOnly(srv.CreateGame)).Methods("POST")
 	api.HandleFunc("/games/{id}", handlers.PlayerOnly(srv.ClearGame)).Methods("DELETE")
@@ -49,6 +51,8 @@ func main() {
 
 	// Real-time gameplay (auth handled inside via Basic Auth or query params).
 	r.HandleFunc("/ws", srv.ServeWS)
+	// Lobby presence + invite delivery (same auth scheme as /ws).
+	r.HandleFunc("/lobby", srv.ServeLobby)
 
 	// Static frontend. no-cache makes browsers revalidate, so updated assets
 	// (app.js/style.css) are picked up without a manual hard-refresh.

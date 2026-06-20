@@ -54,6 +54,7 @@ function setWhoami() {
 }
 
 async function route() {
+  disconnectLobby(); // re-established by loadLobby() when landing in the lobby
   if (!Auth.has()) { ME = null; setWhoami(); show('auth-view'); return; }
   try {
     ME = await api('GET', '/me');
@@ -167,6 +168,7 @@ $('admin-create-form').addEventListener('submit', async e => {
 
 // ---- Lobby ----------------------------------------------------------------
 async function loadLobby() {
+  connectLobby(); // become "available" for invites while in the lobby
   try {
     const players = await api('GET', '/players') || [];
     const oppBox = $('opponent-list');
@@ -186,7 +188,9 @@ async function loadLobby() {
       const names = (g.members || []).map(m => esc(m.username)).join(', ');
       const row = el('div', 'list-item');
       row.innerHTML = `<span><b>${esc(g.name)}</b><br><span class="meta">${names}</span></span>`;
-      row.append(btn('Add', 'small', async () => {
+      const actions = el('div');
+      actions.append(btn('Invite', 'small', () => inviteGroup(g)));
+      actions.append(btn('Add', 'small', async () => {
         const name = prompt('Username to add to ' + g.name + ':');
         if (!name) return;
         const all = await api('GET', '/players');
@@ -195,6 +199,12 @@ async function loadLobby() {
         await api('POST', `/groups/${g.id}/members`, { user_id: target.id });
         loadLobby();
       }));
+      if (g.owner_id === ME.id) actions.append(btn('Delete', 'small ghost', async () => {
+        if (!confirm(`Delete the group "${g.name}"? This doesn't affect any games already started.`)) return;
+        try { await api('DELETE', `/groups/${g.id}`); loadLobby(); }
+        catch (err) { $('lobby-msg').textContent = err.message; }
+      }));
+      row.append(actions);
       gBox.append(row);
     });
 
@@ -256,6 +266,63 @@ $('create-game-btn').addEventListener('click', async () => {
     openGame(r.game_id);
   } catch (err) { $('lobby-msg').textContent = err.message; }
 });
+
+// inviteGroup creates a game with everyone in the group who is online and free,
+// using the current game-type / target-score selectors, and the server pushes
+// each of them a join popup. The host drops straight into the game.
+async function inviteGroup(g) {
+  const gameType = $('game-type').value;
+  const target = +$('target-score').value;
+  $('lobby-msg').textContent = '';
+  try {
+    const r = await api('POST', `/groups/${g.id}/invite`, { game_type: gameType, target_score: target });
+    openGame(r.game_id);
+  } catch (err) { $('lobby-msg').textContent = err.message; }
+}
+
+// ---- Lobby presence socket (delivers real-time invites) -------------------
+let lobbyWs = null;
+
+function connectLobby() {
+  if (lobbyWs && (lobbyWs.readyState === 0 || lobbyWs.readyState === 1)) return; // already connecting/open
+  if (!Auth.has() || (ME && ME.role === 'admin')) return;
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const url = `${proto}://${location.host}/lobby` +
+    `?u=${encodeURIComponent(Auth.username)}&p=${encodeURIComponent(Auth.password)}`;
+  lobbyWs = new WebSocket(url);
+  lobbyWs.onmessage = ev => {
+    let msg; try { msg = JSON.parse(ev.data); } catch (e) { return; }
+    if (msg.type === 'invite') showInvite(msg);
+  };
+  // Reconnect while the player is still sitting in the lobby.
+  lobbyWs.onclose = () => {
+    lobbyWs = null;
+    if (!$('lobby-view').classList.contains('hidden')) setTimeout(connectLobby, 2000);
+  };
+}
+
+function disconnectLobby() {
+  if (lobbyWs) { lobbyWs.onclose = null; lobbyWs.close(); lobbyWs = null; }
+}
+
+// showInvite pops a modal letting the invited player join or dismiss.
+function showInvite(msg) {
+  const typeName = msg.game_type === 'rummy' ? 'Standard Rummy' : 'Gin Rummy';
+  const grp = msg.group ? ` (${esc(msg.group)})` : '';
+  const overlay = el('div', 'modal-overlay');
+  const box = el('div', 'modal');
+  box.innerHTML = `<h3>Game invite</h3>
+    <p><b>${esc(msg.from || 'Someone')}</b> invited you to a game of <b>${esc(typeName)}</b>${grp}.</p>`;
+  const row = el('div', 'modal-actions');
+  const close = () => overlay.remove();
+  row.append(btn('Join', '', () => { close(); openGame(msg.game_id); }));
+  row.append(btn('Cancel', 'ghost', close));
+  box.append(row);
+  overlay.append(box);
+  // A new invite supersedes any older popup still on screen.
+  document.querySelectorAll('.modal-overlay').forEach(o => o.remove());
+  document.body.append(overlay);
+}
 
 // ---- Game -----------------------------------------------------------------
 let ws = null;
@@ -320,6 +387,7 @@ function trackDraw(s) {
 }
 
 function openGame(gameID) {
+  disconnectLobby(); // entering a game → no longer "available" in the lobby
   currentGame = gameID;
   selectedCard = null;
   prevHand = null;

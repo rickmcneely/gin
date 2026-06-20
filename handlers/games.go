@@ -15,13 +15,15 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// Server bundles the live-game Hub with the HTTP handlers that need it.
+// Server bundles the live-game Hub and the lobby presence hub with the HTTP
+// handlers that need them.
 type Server struct {
-	Hub *Hub
+	Hub   *Hub
+	Lobby *LobbyHub
 }
 
 func NewServer() *Server {
-	return &Server{Hub: NewHub()}
+	return &Server{Hub: NewHub(), Lobby: NewLobbyHub()}
 }
 
 var upgrader = websocket.Upgrader{
@@ -107,33 +109,41 @@ func (s *Server) CreateGame(w http.ResponseWriter, r *http.Request) {
 		players = append(players, &ginrummy.Player{UserID: -(i + 1), Username: name, IsRobot: true})
 	}
 
-	// Persist the game and its human seats.
-	gameID, err := models.CreateGameRow(req.GroupID, req.GameType, req.TargetScore)
+	gameID, err := s.launchGame(req.GroupID, req.GameType, req.TargetScore, players)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not create game")
 		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]interface{}{"game_id": gameID})
+}
+
+// launchGame persists a game and its human seats, builds the engine, registers
+// the live room and deals. Shared by direct creation and group invites.
+func (s *Server) launchGame(groupID *int, gameType string, target int, players []*ginrummy.Player) (int, error) {
+	gameID, err := models.CreateGameRow(groupID, gameType, target)
+	if err != nil {
+		return 0, err
 	}
 	for seat, p := range players {
 		if p.IsRobot {
 			continue
 		}
 		if err := models.AddGamePlayer(gameID, p.UserID, seat); err != nil {
-			writeError(w, http.StatusInternalServerError, "could not seat players")
-			return
+			return 0, err
 		}
 	}
 
 	var game engine
-	if req.GameType == "rummy" {
-		game = rummy.NewGame(gameID, players, req.TargetScore)
+	if gameType == "rummy" {
+		game = rummy.NewGame(gameID, players, target)
 	} else {
-		game = ginrummy.NewGame(gameID, players, req.TargetScore)
+		game = ginrummy.NewGame(gameID, players, target)
 	}
 	rm := s.Hub.AddGame(gameID, game)
 	rm.persist()       // save initial state so the game is resumable immediately
 	rm.AdvanceRobots() // in case the first player to act is a robot
-
-	writeJSON(w, http.StatusCreated, map[string]interface{}{"game_id": gameID})
+	return gameID, nil
 }
 
 // ClearGame removes a finished game from the player's list (and the database).

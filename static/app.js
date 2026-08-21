@@ -398,7 +398,10 @@ function trackDraw(s) {
     highlightTimer = setTimeout(() => {
       justDrawn.clear();
       highlightTimer = null;
-      if (lastState) renderGame(lastState);
+      // Strip the glow in place rather than re-rendering: a full renderGame here
+      // rebuilds the hand, and destroying the card under the player's finger
+      // released its implicit pointer capture on touch and swallowed the tap.
+      document.querySelectorAll('.card.just-drawn').forEach(el => el.classList.remove('just-drawn'));
     }, 3000);
   }
   prevHand = hand.slice();
@@ -682,6 +685,10 @@ function makeCardDraggable(cardEl, code, onTap) {
     sweepGhosts();             // and any orphaned clone from a broken drag
     press = { code, cardEl, pid: e.pointerId, startX: e.clientX, startY: e.clientY, onTap, dragging: false };
   });
+  // Belt and braces: if the card is detached mid-gesture, its pointerup may fire
+  // on the orphaned node and never bubble to window. onPressUp clears `press`,
+  // so whichever listener runs first wins and the other returns immediately.
+  cardEl.addEventListener('pointerup', onPressUp);
 }
 
 // sweepGhosts removes every drag clone in the DOM — not just the tracked one —
@@ -735,8 +742,18 @@ function onPressCancel(e) {
 window.addEventListener('pointermove', onPressMove, { passive: false });
 window.addEventListener('pointerup', onPressUp);
 window.addEventListener('pointercancel', onPressCancel);
-// If the gesture is lost (capture released, tab/app backgrounded), clean up.
-window.addEventListener('lostpointercapture', () => { if (press) endPress(true); });
+// Losing pointer capture mid-press is not the end of the gesture. Touch pointers
+// get implicit capture on the card they press, so any re-render that replaces
+// that card releases the capture — killing `press` here dropped the tap that
+// followed on pointerup (the card rose on :hover but never got selected). Clear
+// the drag visuals, but keep a press that never became a drag alive so its
+// pointerup can still register as a tap. A truly lost gesture is cleaned up by
+// pointercancel, blur, or the next pointerdown.
+window.addEventListener('lostpointercapture', () => {
+  if (!press) return;
+  if (press.dragging) { endPress(true); return; }
+  sweepGhosts();
+});
 window.addEventListener('blur', () => { if (press) endPress(true); });
 
 function makeDragGhost(cardEl, x, y) {

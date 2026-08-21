@@ -271,3 +271,29 @@ button.small { padding: 6px 10px; font-size: 13px; }
 /* System messages (e.g. illegal-move explanations) in the chat queue */
 .chat-log .line.system { color: #ffd9d4; }
 .chat-log .line.system .who { color: #ff8a7a; }
+
+/* Scoring breakdown popup ------------------------------------------------- */
+.modal {
+  position: fixed; inset: 0; z-index: 100;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.55); padding: 16px;
+}
+.modal.hidden { display: none; }
+.modal-card {
+  background: var(--panel); color: #222; border-radius: 14px; padding: 20px;
+  max-width: 520px; width: 100%; max-height: 85vh; overflow-y: auto;
+  box-shadow: 0 18px 50px rgba(0,0,0,0.5);
+}
+.modal-card h3 { margin: 0 0 12px; color: var(--felt-dark); }
+.modal-close {
+  margin-top: 16px; width: 100%; padding: 12px; font-size: 16px;
+}
+/* One player's working: a heading, then the arithmetic that produced a score. */
+.score-block { margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #e6e6e6; }
+.score-block:last-of-type { border-bottom: none; }
+.score-who { font-weight: 700; margin-bottom: 6px; }
+.score-line { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
+.score-line .why { color: #555; }
+.score-line .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.score-line.sum { border-top: 1px solid #ddd; margin-top: 4px; padding-top: 5px; font-weight: 700; }
+.score-note { color: #555; font-size: 13px; margin: 0 0 12px; }

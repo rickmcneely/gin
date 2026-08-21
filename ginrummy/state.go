@@ -60,6 +60,10 @@ func (g *Game) StateFor(userID int) map[string]interface{} {
 		// The upcard went round untaken, so this draw must come from the stock.
 		"must_draw_stock": g.StockOnly,
 		"box_bonus":       BoxBonus,
+		"gin_bonus":       GinBonus,
+		"undercut_bonus":  UndercutBonus,
+		// The hand was cancelled (stock floor or an agreed draw), so nobody scored.
+		"hand_washed": g.Washed,
 	}
 
 	if idx := g.playerIndex(userID); idx >= 0 {

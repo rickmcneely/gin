@@ -15,6 +15,7 @@ type resultSnap struct {
 	Username  string     `json:"username"`
 	Melds     []meldSnap `json:"melds"`
 	Deadwood  int        `json:"deadwood"`
+	DeadwoodBefore int   `json:"deadwood_before"`
 	Points    int        `json:"points"`
 	IsKnocker bool       `json:"is_knocker"`
 	Gin       bool       `json:"gin"`
@@ -69,7 +70,8 @@ func (g *Game) Snapshot() ([]byte, error) {
 	}
 	for _, r := range g.LastResults {
 		rs := resultSnap{
-			UserID: r.UserID, Username: r.Username, Deadwood: r.Deadwood, Points: r.Points,
+			UserID: r.UserID, Username: r.Username, Deadwood: r.Deadwood,
+			DeadwoodBefore: r.DeadwoodBefore, Points: r.Points,
 			IsKnocker: r.IsKnocker, Gin: r.Gin, Undercut: r.Undercut, HandCodes: r.HandCodes,
 			LaidOff: r.LaidOff, Boxes: r.Boxes,
 		}
@@ -102,7 +104,8 @@ func LoadGame(data []byte) (*Game, error) {
 	}
 	for _, r := range s.LastResults {
 		hr := HandResult{
-			UserID: r.UserID, Username: r.Username, Deadwood: r.Deadwood, Points: r.Points,
+			UserID: r.UserID, Username: r.Username, Deadwood: r.Deadwood,
+			DeadwoodBefore: r.DeadwoodBefore, Points: r.Points,
 			IsKnocker: r.IsKnocker, Gin: r.Gin, Undercut: r.Undercut, HandCodes: r.HandCodes,
 			LaidOff: r.LaidOff, Boxes: r.Boxes,
 		}

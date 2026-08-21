@@ -64,6 +64,7 @@ type HandResult struct {
 	Username string   `json:"username"`
 	Melds    []Meld   `json:"melds"`
 	Deadwood int      `json:"deadwood"`
+	DeadwoodBefore int `json:"deadwood_before"` // before laying off on the knocker
 	Points   int      `json:"points"`     // points scored this hand
 	IsKnocker bool    `json:"is_knocker"`
 	Gin      bool     `json:"gin"`
@@ -337,7 +338,7 @@ func (g *Game) scoreHand(knockerIdx int) {
 		a := Analyze(p.Hand)
 		results[i] = HandResult{
 			UserID: p.UserID, Username: p.Username,
-			Melds: a.Melds, Deadwood: a.Deadwood,
+			Melds: a.Melds, Deadwood: a.Deadwood, DeadwoodBefore: a.Deadwood,
 			HandCodes: codes(p.Hand),
 		}
 	}

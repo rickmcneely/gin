@@ -409,6 +409,8 @@ function trackDraw(s) {
 
 function openGame(gameID) {
   disconnectLobby(); // entering a game → no longer "available" in the lobby
+  scoreShownFor = null;
+  hideScoreModal();
   currentGame = gameID;
   selectedCard = null;
   prevHand = null;
@@ -865,7 +867,7 @@ function renderGame(s) {
     logHandNumber = s.hand_number;
   }
   const myTurn = s.turn_user_id === ME.id;
-  const phaseName = { draw: 'Draw', discard: 'Discard', play: 'Play', roundEnd: 'Hand over', gameOver: 'Game over' }[s.phase] || s.phase;
+  const phaseName = { upcard: 'Upcard', draw: 'Draw', discard: 'Discard', play: 'Play', roundEnd: 'Hand over', gameOver: 'Game over' }[s.phase] || s.phase;
   const typeName = s.game_type === 'rummy' ? 'Rummy' : 'Gin';
   $('app-title').textContent = s.game_type === 'rummy' ? '🃏 Standard Rummy' : '🃏 Gin Rummy';
   document.title = s.game_type === 'rummy' ? 'Standard Rummy' : 'Gin Rummy';
@@ -882,6 +884,7 @@ function renderGame(s) {
 
   renderDrawOffer(s);
   renderResults(s);
+  maybeShowScoreBreakdown(s);
   syncLogHeight();
   refreshFocus();
 }
@@ -1198,6 +1201,155 @@ function renderResults(s) {
     <tbody>${rows}</tbody></table>
     ${finalTally}
     <div class="melds-display">${melds}</div>`;
+  panel.append(btn('How this scored', '', () => showScoreModal(s)));
+}
+
+// ---- Scoring breakdown popup ----------------------------------------------
+// The scoring has enough moving parts — lay-offs, undercuts, box bonuses, the
+// rummy double — that the results table alone does not show its working. This
+// raises the arithmetic once per finished hand.
+let scoreShownFor = null; // hand_number already explained, so it shows once
+
+function maybeShowScoreBreakdown(s) {
+  if ((s.phase !== 'roundEnd' && s.phase !== 'gameOver') || !s.results) return;
+  const key = `${s.game_id}:${s.hand_number}:${s.phase}`;
+  if (scoreShownFor === key) return;
+  scoreShownFor = key;
+  showScoreModal(s);
+}
+
+function showScoreModal(s) {
+  const body = $('score-modal-body');
+  if (!body) return;
+  body.innerHTML = s.game_type === 'rummy' ? rummyBreakdown(s) : ginBreakdown(s);
+  $('score-modal').classList.remove('hidden');
+  refreshFocus(); // the encoder/keyboard ring collapses to the Close button
+}
+
+function hideScoreModal() {
+  const m = $('score-modal');
+  if (!m || m.classList.contains('hidden')) return;
+  m.classList.add('hidden');
+  refreshFocus();
+}
+
+function scoreModalOpen() {
+  const m = $('score-modal');
+  return !!m && !m.classList.contains('hidden');
+}
+
+// line renders one row of working: what it is, and what it is worth.
+function line(why, num, cls) {
+  return `<div class="score-line ${cls || ''}"><span class="why">${why}</span><span class="num">${num}</span></div>`;
+}
+
+function nameOf(s, userId) {
+  const p = s.players.find(p => p.user_id === userId);
+  return esc(p ? p.username : '—');
+}
+
+// ginBreakdown explains a knock, a gin, an undercut or a cancelled hand.
+function ginBreakdown(s) {
+  const knocker = s.results.find(r => r.is_knocker);
+  if (!knocker) {
+    return `<p class="score-note">${s.hand_washed
+      ? 'The hand was cancelled — the stock ran down to two cards with nobody knocking, so nothing was scored. The same dealer deals again.'
+      : 'The hand ended without a knock, so nothing was scored.'}</p>` + ginDeadwoodBlocks(s);
+  }
+  const ginB = s.gin_bonus || 20, cutB = s.undercut_bonus || 10, boxB = s.box_bonus || 20;
+  const opponents = s.results.filter(r => !r.is_knocker);
+  let html = '';
+
+  if (knocker.gin) {
+    html += `<p class="score-note">${esc(knocker.username)} went gin — no unmatched cards at all — so the opponent cannot undercut and lays nothing off.</p>`;
+    const block = opponents.map(o =>
+      line(`${esc(o.username)}'s deadwood`, o.deadwood)).join('');
+    html += `<div class="score-block"><div class="score-who">${esc(knocker.username)} scores</div>` +
+      block + line(`gin bonus`, `+${ginB}`) +
+      line('hand total', knocker.points, 'sum') + '</div>';
+  } else {
+    opponents.forEach(o => {
+      const laid = (o.laid_off || []);
+      let work = line(`${esc(knocker.username)}'s deadwood`, knocker.deadwood);
+      if (laid.length) {
+        work += line(`${esc(o.username)}'s deadwood`, o.deadwood_before);
+        work += line(`laid off on ${esc(knocker.username)}'s melds: ${laid.map(pretty).join(', ')}`,
+          `−${o.deadwood_before - o.deadwood}`);
+      }
+      work += line(`${esc(o.username)}'s deadwood${laid.length ? ' after lay-offs' : ''}`, o.deadwood);
+
+      if (o.undercut) {
+        work += line(`undercut — ${esc(o.username)} is level or lower, so they score the difference`,
+          `${knocker.deadwood} − ${o.deadwood} = ${knocker.deadwood - o.deadwood}`);
+        work += line('undercut bonus', `+${cutB}`);
+        work += line(`${esc(o.username)} scores`, o.points, 'sum');
+      } else {
+        work += line('difference', `${o.deadwood} − ${knocker.deadwood} = ${o.deadwood - knocker.deadwood}`);
+        work += line(`${esc(knocker.username)} scores`, o.deadwood - knocker.deadwood, 'sum');
+      }
+      html += `<div class="score-block"><div class="score-who">${esc(knocker.username)} knocked` +
+        `${opponents.length > 1 ? ' — against ' + esc(o.username) : ''}</div>${work}</div>`;
+    });
+  }
+
+  const winner = s.results.find(r => r.points > 0);
+  if (winner) {
+    html += `<p class="score-note">${esc(winner.username)} wins the hand, which is worth a box bonus of ` +
+      `${boxB} at the end of the game. Boxes and the game bonus are added when someone reaches ` +
+      `${s.target_score}; only hand points count towards it.</p>`;
+  }
+  if (s.phase === 'gameOver') {
+    const w = s.players.find(p => p.user_id === s.winner_id);
+    if (w) {
+      html += `<div class="score-block"><div class="score-who">${esc(w.username)} wins the game</div>` +
+        line('hand points', w.score) +
+        line(`boxes (${w.boxes} × ${boxB})`, `+${w.boxes * boxB}`) +
+        line(w.bonus > 100 ? 'game bonus (doubled — the opponent never scored)' : 'game bonus', `+${w.bonus}`) +
+        line('final score', w.total, 'sum') + '</div>';
+    }
+  }
+  return html;
+}
+
+// ginDeadwoodBlocks lists each hand's deadwood when no score was made.
+function ginDeadwoodBlocks(s) {
+  return s.results.map(r =>
+    `<div class="score-block"><div class="score-who">${esc(r.username)}</div>` +
+    line('deadwood left in hand', r.deadwood) + '</div>').join('');
+}
+
+// rummyBreakdown explains going out, going rummy, or a blocked hand.
+function rummyBreakdown(s) {
+  const out = s.results.find(r => r.went_out);
+  const blocked = s.results.find(r => r.blocked);
+  const winner = out || blocked;
+  if (!winner) {
+    return '<p class="score-note">The hand was blocked with the lowest counts tied, so nothing was scored.</p>' +
+      s.results.map(r => `<div class="score-block"><div class="score-who">${esc(r.username)}</div>` +
+        line('cards left in hand', r.remaining) + '</div>').join('');
+  }
+  let html = `<p class="score-note">${blocked
+    ? 'Nobody could play on: the deck cycled with no meld or lay-off, so the hand went to the lowest count.'
+    : esc(winner.username) + ' got rid of every card.'}</p>`;
+
+  let work = '';
+  let raw = 0;
+  s.results.filter(r => r.user_id !== winner.user_id).forEach(r => {
+    raw += r.remaining;
+    work += line(`${esc(r.username)}'s remaining cards`, r.remaining);
+  });
+  if (s.results.length > 2) work += line('total from the other hands', raw);
+  if (winner.rummy) {
+    work += line('went out in a single turn — rummy, so the hand doubles', `${raw} × 2`);
+  }
+  work += line(`${esc(winner.username)} scores`, winner.points, 'sum');
+  html += `<div class="score-block"><div class="score-who">${esc(winner.username)}` +
+    `${winner.rummy ? ' went rummy' : blocked ? ' wins the blocked hand' : ' went out'}</div>${work}</div>`;
+
+  if (s.phase === 'gameOver') {
+    html += `<p class="score-note">${nameOf(s, s.winner_id)} reached the ${s.target_score}-point target and wins the game.</p>`;
+  }
+  return html;
 }
 
 // scoreOf returns a player's cumulative match score from the current state.
@@ -1236,6 +1388,7 @@ function renderRummyResults(s, panel) {
   panel.innerHTML = `<h3>${title}</h3>
     <table><thead><tr><th>Player</th><th>Cards left</th><th>This hand</th><th>Total / ${s.target_score}</th></tr></thead>
     <tbody>${rows}</tbody></table>`;
+  panel.append(btn('How this scored', '', () => showScoreModal(s)));
 }
 
 // meldsHTML lays out one player's melds (and leftover deadwood) as mini cards.
@@ -1322,6 +1475,10 @@ $('discard-pile').addEventListener('click', () => {
 });
 $('clear-log').addEventListener('click', () => { $('log-entries').innerHTML = ''; });
 
+$('score-modal-close').addEventListener('click', hideScoreModal);
+// Clicking the dimmed backdrop (but not the card itself) closes it too.
+$('score-modal').addEventListener('click', e => { if (e.target.id === 'score-modal') hideScoreModal(); });
+
 // ---- Rotary-encoder / keyboard focus ring ---------------------------------
 // The arcade cabinet drives input with a rotary encoder: rotate to move, push
 // to activate. We model that as ONE focus ring over every actionable element —
@@ -1347,6 +1504,7 @@ function inGame() { return !$('game-view').classList.contains('hidden'); }
 
 // focusables returns the ordered ring of currently-actionable elements.
 function focusables() {
+  if (scoreModalOpen()) return [$('score-modal-close')];
   const list = [];
   document.querySelectorAll('#your-hand .card').forEach(el => list.push(el));
   if (canDrawNow()) {
@@ -1419,6 +1577,7 @@ function tapCard(cardEl) {
 
 document.addEventListener('keydown', e => {
   if (!inGame()) return;
+  if (e.key === 'Escape' && scoreModalOpen()) { hideScoreModal(); e.preventDefault(); return; }
   switch (e.key) {
     case 'ArrowRight': case 'ArrowDown': setKbdMode(true); moveFocus(1); e.preventDefault(); break;
     case 'ArrowLeft': case 'ArrowUp': setKbdMode(true); moveFocus(-1); e.preventDefault(); break;

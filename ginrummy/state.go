@@ -6,6 +6,9 @@ type PlayerView struct {
 	Username  string `json:"username"`
 	IsRobot   bool   `json:"is_robot"`
 	Score     int    `json:"score"`
+	Boxes     int    `json:"boxes"`
+	Bonus     int    `json:"bonus"`
+	Total     int    `json:"total"`
 	HandCount int    `json:"hand_count"`
 	Connected bool   `json:"connected"`
 	IsTurn    bool   `json:"is_turn"`
@@ -22,6 +25,9 @@ func (g *Game) StateFor(userID int) map[string]interface{} {
 			Username:  p.Username,
 			IsRobot:   p.IsRobot,
 			Score:     p.Score,
+			Boxes:     p.Boxes,
+			Bonus:     p.Bonus,
+			Total:     p.Total(),
 			HandCount: len(p.Hand),
 			Connected: p.Connected,
 			IsTurn:    (g.Phase == PhaseUpcard || g.Phase == PhaseDraw || g.Phase == PhaseDiscard) && i == g.Turn,
@@ -53,6 +59,7 @@ func (g *Game) StateFor(userID int) map[string]interface{} {
 		"players":      players,
 		// The upcard went round untaken, so this draw must come from the stock.
 		"must_draw_stock": g.StockOnly,
+		"box_bonus":       BoxBonus,
 	}
 
 	if idx := g.playerIndex(userID); idx >= 0 {

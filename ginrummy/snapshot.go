@@ -19,6 +19,7 @@ type resultSnap struct {
 	IsKnocker bool       `json:"is_knocker"`
 	Gin       bool       `json:"gin"`
 	Undercut  bool       `json:"undercut"`
+	Boxes     int        `json:"boxes"`
 	HandCodes []string   `json:"hand"`
 	LaidOff   []string   `json:"laid_off"`
 }
@@ -29,6 +30,8 @@ type playerSnap struct {
 	IsRobot  bool   `json:"is_robot"`
 	Hand     []Card `json:"hand"`
 	Score    int    `json:"score"`
+	Boxes    int    `json:"boxes"`
+	Bonus    int    `json:"bonus"`
 }
 
 type gameSnap struct {
@@ -62,13 +65,13 @@ func (g *Game) Snapshot() ([]byte, error) {
 		TakenCard: g.TakenCard, TakenValid: g.TakenValid, Washed: g.Washed,
 	}
 	for _, p := range g.Players {
-		s.Players = append(s.Players, playerSnap{p.UserID, p.Username, p.IsRobot, p.Hand, p.Score})
+		s.Players = append(s.Players, playerSnap{p.UserID, p.Username, p.IsRobot, p.Hand, p.Score, p.Boxes, p.Bonus})
 	}
 	for _, r := range g.LastResults {
 		rs := resultSnap{
 			UserID: r.UserID, Username: r.Username, Deadwood: r.Deadwood, Points: r.Points,
 			IsKnocker: r.IsKnocker, Gin: r.Gin, Undercut: r.Undercut, HandCodes: r.HandCodes,
-			LaidOff: r.LaidOff,
+			LaidOff: r.LaidOff, Boxes: r.Boxes,
 		}
 		for _, m := range r.Melds {
 			rs.Melds = append(rs.Melds, meldSnap{m.Kind, m.Cards})
@@ -94,13 +97,14 @@ func LoadGame(data []byte) (*Game, error) {
 	for _, p := range s.Players {
 		g.Players = append(g.Players, &Player{
 			UserID: p.UserID, Username: p.Username, IsRobot: p.IsRobot, Hand: p.Hand, Score: p.Score,
+			Boxes: p.Boxes, Bonus: p.Bonus,
 		})
 	}
 	for _, r := range s.LastResults {
 		hr := HandResult{
 			UserID: r.UserID, Username: r.Username, Deadwood: r.Deadwood, Points: r.Points,
 			IsKnocker: r.IsKnocker, Gin: r.Gin, Undercut: r.Undercut, HandCodes: r.HandCodes,
-			LaidOff: r.LaidOff,
+			LaidOff: r.LaidOff, Boxes: r.Boxes,
 		}
 		for _, m := range r.Melds {
 			hr.Melds = append(hr.Melds, Meld{Kind: m.Kind, Cards: m.Cards, Codes: codes(m.Cards)})

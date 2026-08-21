@@ -15,6 +15,17 @@ const (
 
 const KnockThreshold = 10
 
+// Scoring bonuses, following pagat's Gin Rummy scoring. Box (line) bonuses and
+// the game bonus are awarded on top of hand points and do not count towards
+// TargetScore — only the deadwood differences do.
+const (
+	GinBonus      = 20  // going gin, on top of the opponent's deadwood
+	UndercutBonus = 10  // undercutting the knocker, on top of the difference
+	BoxBonus      = 20  // per hand won, added at the end of the game
+	GameBonus     = 100 // for reaching the target score first
+	ShutoutBonus  = 200 // ... when no opponent scored a single point
+)
+
 // StockFloor is how many cards must remain in the stock for play to continue:
 // when a player discards without knocking and only this many are left, the hand
 // is cancelled and dealt again by the same dealer.
@@ -37,9 +48,15 @@ type Player struct {
 	Username string `json:"username"`
 	IsRobot  bool   `json:"is_robot"`
 	Hand     []Card `json:"-"`
-	Score    int    `json:"score"`
+	Score    int    `json:"score"`  // hand points; this is what reaches TargetScore
+	Boxes    int    `json:"boxes"`  // hands won, each worth BoxBonus at the end
+	Bonus    int    `json:"bonus"`  // game bonus, awarded when the game is over
 	Connected bool  `json:"connected"`
 }
+
+// Total is the player's final score: hand points, plus a box bonus for each
+// hand won, plus the game bonus if they won the game.
+func (p *Player) Total() int { return p.Score + BoxBonus*p.Boxes + p.Bonus }
 
 // HandResult captures one player's standing when a hand ends.
 type HandResult struct {
@@ -51,6 +68,7 @@ type HandResult struct {
 	IsKnocker bool    `json:"is_knocker"`
 	Gin      bool     `json:"gin"`
 	Undercut bool     `json:"undercut"`
+	Boxes    int      `json:"boxes"`    // the winner's running count of hands won
 	HandCodes []string `json:"hand"`
 	LaidOff  []string `json:"laid_off"` // cards shed onto the knocker's melds
 }
@@ -348,18 +366,26 @@ func (g *Game) scoreHand(knockerIdx int) {
 		} else if oppDead > ka.Deadwood {
 			knockerGain += oppDead - ka.Deadwood
 		} else {
-			// Undercut: this opponent scores the difference plus a 25 bonus.
-			pts := (ka.Deadwood - oppDead) + 25
+			// Undercut: this opponent scores the difference plus the bonus.
+			pts := (ka.Deadwood - oppDead) + UndercutBonus
 			results[i].Points += pts
 			results[i].Undercut = true
 			g.Players[i].Score += pts
 		}
 	}
 	if gin {
-		knockerGain += 25 // gin bonus (once)
+		knockerGain += GinBonus // once, however many opponents there are
 	}
 	results[knockerIdx].Points = knockerGain
 	knocker.Score += knockerGain
+
+	// A box for each player who took points off this hand.
+	for i := range g.Players {
+		if results[i].Points > 0 {
+			g.Players[i].Boxes++
+			results[i].Boxes = g.Players[i].Boxes
+		}
+	}
 
 	g.LastResults = results
 	g.afterHand()
@@ -380,10 +406,33 @@ func (g *Game) afterHand() {
 	}
 	if reached {
 		g.WinnerID = winner
+		g.awardGameBonus(winner)
 		g.Phase = PhaseGameOver
 		return
 	}
 	g.Phase = PhaseRoundEnd
+}
+
+// awardGameBonus gives the game winner their bonus — doubled when no opponent
+// scored a single point over the whole game.
+func (g *Game) awardGameBonus(winnerID int) {
+	shutout := true
+	for _, p := range g.Players {
+		if p.UserID != winnerID && p.Score > 0 {
+			shutout = false
+			break
+		}
+	}
+	for _, p := range g.Players {
+		if p.UserID == winnerID {
+			if shutout {
+				p.Bonus = ShutoutBonus
+			} else {
+				p.Bonus = GameBonus
+			}
+			return
+		}
+	}
 }
 
 // NextHand deals a fresh hand after a round has ended, rotating the dealer.

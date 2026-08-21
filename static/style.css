@@ -236,6 +236,7 @@ button.small { padding: 6px 10px; font-size: 13px; }
 .results th, .results td { padding: 6px 10px; text-align: left; border-bottom: 1px solid #eee; }
 .results .winner { font-weight: 700; color: var(--felt-dark); }
 .results td.total { font-weight: 700; color: var(--felt-dark); }
+.results h4 { margin: 16px 0 6px; color: var(--felt-dark); font-size: 14px; }
 
 .melds-display { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
 .player-melds {

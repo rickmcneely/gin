@@ -1161,18 +1161,36 @@ function renderResults(s) {
     const knocker = s.results.find(r => r.is_knocker);
     if (knocker) title = knocker.gin ? `${esc(knocker.username)} went GIN!` : `${esc(knocker.username)} knocked`;
   }
+  const boxBonus = s.box_bonus || 20;
   let rows = s.results.map(r => {
     const tag = r.undercut ? ' <span class="badge">undercut</span>' : (r.is_knocker ? ' <span class="badge">knock</span>' : '');
-    return `<tr><td>${esc(r.username)}${tag}</td><td>${r.deadwood}</td><td>+${r.points}</td><td class="total">${scoreOf(s, r.user_id)}</td></tr>`;
+    const boxes = boxesOf(s, r.user_id);
+    return `<tr><td>${esc(r.username)}${tag}</td><td>${r.deadwood}</td><td>+${r.points}</td>` +
+      `<td>${boxes ? boxes + ' × ' + boxBonus : '—'}</td>` +
+      `<td class="total">${scoreOf(s, r.user_id)}</td></tr>`;
   }).join('');
+
+  // Boxes and the game bonus sit outside the race to the target score, so the
+  // final tally only makes sense once the game is over.
+  let finalTally = '';
+  if (s.phase === 'gameOver') {
+    const finals = s.players.map(p =>
+      `<tr><td>${esc(p.username)}</td><td>${p.score}</td>` +
+      `<td>${p.boxes ? '+' + (p.boxes * boxBonus) + ' (' + p.boxes + ')' : '—'}</td>` +
+      `<td>${p.bonus ? '+' + p.bonus : '—'}</td><td class="total">${p.total}</td></tr>`).join('');
+    finalTally = `<h4>Final score</h4>
+      <table><thead><tr><th>Player</th><th>Hand points</th><th>Boxes</th><th>Game bonus</th><th>Total</th></tr></thead>
+      <tbody>${finals}</tbody></table>`;
+  }
 
   // The hand's winner is whoever scored points (knocker, or the undercutter).
   const handWinner = s.results.reduce((best, r) => (r.points > (best ? best.points : 0) ? r : best), null);
   const melds = s.results.map(r => meldsHTML(r, handWinner && r.user_id === handWinner.user_id)).join('');
 
   panel.innerHTML = `<h3>${title}</h3>
-    <table><thead><tr><th>Player</th><th>Deadwood</th><th>This hand</th><th>Total / ${s.target_score}</th></tr></thead>
+    <table><thead><tr><th>Player</th><th>Deadwood</th><th>This hand</th><th>Boxes</th><th>Total / ${s.target_score}</th></tr></thead>
     <tbody>${rows}</tbody></table>
+    ${finalTally}
     <div class="melds-display">${melds}</div>`;
 }
 
@@ -1180,6 +1198,12 @@ function renderResults(s) {
 function scoreOf(s, userId) {
   const p = s.players.find(p => p.user_id === userId);
   return p ? p.score : 0;
+}
+
+// boxesOf returns how many hands a player has won (each worth a box bonus).
+function boxesOf(s, userId) {
+  const p = s.players.find(p => p.user_id === userId);
+  return p ? (p.boxes || 0) : 0;
 }
 
 // renderRummyResults shows who went out and the points scored from opponents' cards.

@@ -54,6 +54,9 @@ func (g *Game) DecideDiscard(idx int) (Card, bool) {
 	bestCard := p.Hand[0]
 	bestDead := 1 << 30
 	for i := range p.Hand {
+		if g.barred(p.Hand[i]) {
+			continue // the card just taken from the discard cannot go back
+		}
 		rest := append([]Card{}, p.Hand[:i]...)
 		rest = append(rest, p.Hand[i+1:]...)
 		d := Analyze(rest).Deadwood
@@ -62,6 +65,20 @@ func (g *Game) DecideDiscard(idx int) (Card, bool) {
 			bestCard = p.Hand[i]
 		}
 	}
+	if g.barred(bestCard) {
+		// Every candidate was skipped (a one-card hand cannot happen in play,
+		// but never hand back an illegal discard).
+		for _, c := range p.Hand {
+			if !g.barred(c) {
+				bestCard = c
+				break
+			}
+		}
+	}
 	knock := bestDead <= KnockThreshold
 	return bestCard, knock
 }
+
+// barred reports whether a card was taken from the discard pile this turn, and
+// so cannot be discarded back onto it.
+func (g *Game) barred(c Card) bool { return g.TakenValid && c == g.TakenCard }

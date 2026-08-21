@@ -71,7 +71,14 @@ func (g *Game) StateFor(userID int) map[string]interface{} {
 		// During the discard phase your hand is HandSize+1; we report whether a
 		// knock is reachable at all (best deadwood after the optimal discard).
 		if g.Phase == PhaseDiscard && idx == g.Turn {
-			canKnock = bestKnockDeadwood(p.Hand) <= KnockThreshold
+			// The card just taken from the discard cannot be the one discarded.
+			var legal []Card
+			for _, c := range p.Hand {
+				if !g.barred(c) {
+					legal = append(legal, c)
+				}
+			}
+			canKnock = bestKnockDeadwoodOf(p.Hand, legal) <= KnockThreshold
 		}
 		state["your_analysis"] = map[string]interface{}{
 			"deadwood":  a.Deadwood,
@@ -89,11 +96,22 @@ func (g *Game) StateFor(userID int) map[string]interface{} {
 
 // bestKnockDeadwood returns the minimum deadwood achievable after discarding one
 // card from an (oversized) hand.
-func bestKnockDeadwood(hand []Card) int {
+func bestKnockDeadwood(hand []Card) int { return bestKnockDeadwoodOf(hand, hand) }
+
+// bestKnockDeadwoodOf is bestKnockDeadwood restricted to the cards that may
+// legally be discarded.
+func bestKnockDeadwoodOf(hand, allowed []Card) int {
 	best := 1 << 30
-	for i := range hand {
-		rest := append([]Card{}, hand[:i]...)
-		rest = append(rest, hand[i+1:]...)
+	for _, c := range allowed {
+		rest := make([]Card, 0, len(hand)-1)
+		dropped := false
+		for _, x := range hand {
+			if !dropped && x == c {
+				dropped = true
+				continue
+			}
+			rest = append(rest, x)
+		}
 		if d := Analyze(rest).Deadwood; d < best {
 			best = d
 		}

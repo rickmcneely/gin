@@ -29,6 +29,8 @@ var (
 	errBadCard      = errors.New("That isn't a valid card.")
 	errNotRoundEnd  = errors.New("The hand isn't over yet — finish the current hand first.")
 	errBadAction    = errors.New("That action isn't allowed.")
+	errOneMeld      = errors.New("Only one meld per turn — lay off onto melds already on the table, or discard.")
+	errNoRedis      = errors.New("You can't discard the card you just took from the discard pile — play a different one.")
 	// errHandEnded is an internal signal (not an illegal-move error) meaning the
 	// draw could not happen because the hand ended (stalemate / no cards left).
 	errHandEnded = errors.New("the hand has ended")
@@ -54,6 +56,7 @@ type HandResult struct {
 	Blocked   bool     `json:"blocked"`   // won a blocked (stalemate) hand on lowest count
 	Remaining int      `json:"remaining"` // total value of cards left in hand
 	Points    int      `json:"points"`    // points scored this hand
+	Rummy     bool     `json:"rummy"`     // went out in one turn, doubling the hand
 	HandCodes []string `json:"hand"`
 }
 
@@ -74,14 +77,33 @@ type RummyGame struct {
 	LastResults []HandResult
 	progressed  bool // a meld or lay-off happened since the last stock reshuffle
 	reshuffles  int  // how many times the discard has been recycled into the stock
+	meldedTurn  bool // a meld has been laid down this turn (only one is allowed)
+	laidTurn    bool // this player has melded or laid off during this turn
+	laidBefore  map[int]bool // players who melded or laid off on an earlier turn
+	taken       gr.Card      // card drawn from the discard this turn; cannot go back
+	tookDiscard bool
 	mu          sync.Mutex
 }
 
-// NewGame creates and deals the first hand. Each player gets 7 cards.
+// NewGame creates and deals the first hand.
 func NewGame(id int, players []*gr.Player, target int) *RummyGame {
-	g := &RummyGame{ID: id, Players: players, TargetScore: target, DealerIdx: 0, HandSize: 7}
+	g := &RummyGame{ID: id, Players: players, TargetScore: target, DealerIdx: 0}
+	g.HandSize = handSizeFor(len(players))
 	g.deal()
 	return g
+}
+
+// handSizeFor is the deal size by table size: ten cards head to head, seven for
+// three or four players, six for five or six.
+func handSizeFor(players int) int {
+	switch {
+	case players <= 2:
+		return 10
+	case players <= 4:
+		return 7
+	default:
+		return 6
+	}
 }
 
 func (g *RummyGame) Lock()   { g.mu.Lock() }
@@ -113,6 +135,17 @@ func (g *RummyGame) deal() {
 	g.LastResults = nil
 	g.progressed = false
 	g.reshuffles = 0
+	g.laidBefore = map[int]bool{}
+	g.endTurnState()
+}
+
+// endTurnState clears the per-turn bookkeeping: the one-meld allowance and the
+// card taken from the discard pile, which may not be discarded back.
+func (g *RummyGame) endTurnState() {
+	g.meldedTurn = false
+	g.laidTurn = false
+	g.tookDiscard = false
+	g.taken = 0
 }
 
 // RemovePlayer drops a seated player (an invitee who declined) and re-deals a
@@ -130,6 +163,7 @@ func (g *RummyGame) RemovePlayer(userID int) (remaining int, removed bool) {
 		return remaining, true // not playable — caller cancels the game
 	}
 	g.DealerIdx = 0
+	g.HandSize = handSizeFor(remaining)
 	g.deal()
 	return remaining, true
 }
@@ -197,9 +231,15 @@ func (g *RummyGame) refillStock() bool {
 	g.reshuffles++
 	g.progressed = false
 	top := g.DiscardPile[len(g.DiscardPile)-1]
-	rest := append([]gr.Card{}, g.DiscardPile[:len(g.DiscardPile)-1]...)
-	gr.Shuffle(rest)
-	g.Stock = rest
+	// The pile is turned over rather than shuffled, so its order carries on.
+	// DiscardPile runs bottom to top and the stock is drawn from its end, so
+	// reversing puts the pile's bottom card back on top of the stock.
+	rest := g.DiscardPile[:len(g.DiscardPile)-1]
+	stock := make([]gr.Card, 0, len(rest))
+	for i := len(rest) - 1; i >= 0; i-- {
+		stock = append(stock, rest[i])
+	}
+	g.Stock = stock
 	g.DiscardPile = []gr.Card{top}
 	return true
 }
@@ -258,6 +298,7 @@ func (g *RummyGame) Draw(userID int, fromDiscard bool) (gr.Card, error) {
 		}
 		c = g.DiscardPile[len(g.DiscardPile)-1]
 		g.DiscardPile = g.DiscardPile[:len(g.DiscardPile)-1]
+		g.taken, g.tookDiscard = c, true
 	} else {
 		if len(g.Stock) == 0 && !g.refillStock() {
 			// The hand ended (stalemate / no cards left); refillStock scored it.
@@ -281,6 +322,9 @@ func (g *RummyGame) Meld(userID int, codes []string) (cards []gr.Card, wentOut b
 	if g.Phase != PhasePlay {
 		return nil, false, errDrawFirst
 	}
+	if g.meldedTurn {
+		return nil, false, errOneMeld
+	}
 	cards, err = g.cardsFromHand(idx, codes)
 	if err != nil {
 		return nil, false, err
@@ -293,6 +337,8 @@ func (g *RummyGame) Meld(userID int, codes []string) (cards []gr.Card, wentOut b
 	gr.SortCards(cards)
 	g.Table = append(g.Table, &TableMeld{Kind: kind, Cards: cards, Codes: gr.Codes(cards), Owner: userID})
 	g.progressed = true
+	g.meldedTurn = true
+	g.laidTurn = true
 	if len(g.Players[idx].Hand) == 0 {
 		g.goOut(idx)
 		wentOut = true
@@ -328,6 +374,7 @@ func (g *RummyGame) Layoff(userID int, code string, meldIdx int) (card gr.Card, 
 	tm.Cards = grown
 	tm.Codes = gr.Codes(grown)
 	g.progressed = true
+	g.laidTurn = true
 	if len(g.Players[idx].Hand) == 0 {
 		g.goOut(idx)
 		wentOut = true
@@ -351,19 +398,30 @@ func (g *RummyGame) Discard(userID int, code string) (card gr.Card, wentOut bool
 	if !g.handHas(idx, card) {
 		return 0, false, errNoCard
 	}
+	if g.tookDiscard && card == g.taken {
+		return 0, false, errNoRedis
+	}
 	g.removeFromHand(idx, []gr.Card{card})
 	g.DiscardPile = append(g.DiscardPile, card)
 	if len(g.Players[idx].Hand) == 0 {
 		g.goOut(idx)
 		return card, true, nil
 	}
+	if g.laidTurn {
+		if g.laidBefore == nil {
+			g.laidBefore = map[int]bool{}
+		}
+		g.laidBefore[g.Players[idx].UserID] = true
+	}
+	g.endTurnState()
 	g.Turn = (g.Turn + 1) % len(g.Players)
 	g.Phase = PhaseDraw
 	return card, false, nil
 }
 
 // goOut scores the hand: the player who emptied their hand collects the total
-// value of every opponent's remaining cards.
+// value of every opponent's remaining cards, doubled if they went rummy —
+// emptying the hand in a single turn, having laid nothing down before it.
 func (g *RummyGame) goOut(winnerIdx int) {
 	results := make([]HandResult, len(g.Players))
 	total := 0
@@ -377,10 +435,16 @@ func (g *RummyGame) goOut(winnerIdx int) {
 			total += rem
 		}
 	}
+	rummy := !g.laidBefore[g.Players[winnerIdx].UserID]
+	if rummy {
+		total *= 2
+	}
 	results[winnerIdx].WentOut = true
+	results[winnerIdx].Rummy = rummy
 	results[winnerIdx].Points = total
 	g.Players[winnerIdx].Score += total
 	g.LastResults = results
+	g.endTurnState()
 	g.afterHand()
 }
 
@@ -499,21 +563,21 @@ func (g *RummyGame) Apply(userID int, a gr.Action) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		return outVerbs("laid down "+describeMeld(cards), wentOut), nil
+		return g.outVerbs("laid down "+describeMeld(cards), wentOut), nil
 
 	case "layoff":
 		card, wentOut, err := g.Layoff(userID, a.Card, a.MeldIdx)
 		if err != nil {
 			return nil, err
 		}
-		return outVerbs("laid off the "+card.Name(), wentOut), nil
+		return g.outVerbs("laid off the "+card.Name(), wentOut), nil
 
 	case "discard":
 		card, wentOut, err := g.Discard(userID, a.Card)
 		if err != nil {
 			return nil, err
 		}
-		return outVerbs("discarded the "+card.Name(), wentOut), nil
+		return g.outVerbs("discarded the "+card.Name(), wentOut), nil
 
 	case "nextHand":
 		if err := g.NextHand(); err != nil {
@@ -534,9 +598,16 @@ func (g *RummyGame) Apply(userID int, a gr.Action) ([]string, error) {
 	}
 }
 
-func outVerbs(verb string, wentOut bool) []string {
-	if wentOut {
-		return []string{verb, "went out — Rummy!"}
+// outVerbs appends the going-out verb, calling out a rummy (the whole hand shed
+// in one turn) since it doubles the score.
+func (g *RummyGame) outVerbs(verb string, wentOut bool) []string {
+	if !wentOut {
+		return []string{verb}
 	}
-	return []string{verb}
+	for _, r := range g.LastResults {
+		if r.WentOut && r.Rummy {
+			return []string{verb, "went out in one turn — rummy, double score!"}
+		}
+	}
+	return []string{verb, "went out"}
 }

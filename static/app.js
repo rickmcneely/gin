@@ -1109,10 +1109,14 @@ function renderRummyActions(s, myTurn) {
     if (s.discard_top) box.append(btn(`Take ${pretty(s.discard_top)}`, '', () => send({ type: 'draw', from: 'discard' })));
   } else if (s.phase === 'play') {
     const sel = [...meldSelection];
-    const meldBtn = btn(sel.length >= 3 ? `Lay meld (${sel.length})` : 'Select 3+ to meld', '', () => {
+    // Only one meld may go down per turn; lay-offs stay unlimited.
+    const meldUsed = !!s.melded_this_turn;
+    const meldLabel = meldUsed ? 'Meld used this turn'
+      : (sel.length >= 3 ? `Lay meld (${sel.length})` : 'Select 3+ to meld');
+    const meldBtn = btn(meldLabel, '', () => {
       if (meldSelection.size >= 3) { send({ type: 'meld', cards: [...meldSelection] }); meldSelection.clear(); }
     });
-    meldBtn.disabled = sel.length < 3;
+    meldBtn.disabled = meldUsed || sel.length < 3;
     box.append(meldBtn);
 
     const target = sel.length === 1 ? firstLayoffTarget(s, sel[0]) : -1;
@@ -1131,11 +1135,13 @@ function renderRummyActions(s, myTurn) {
     discBtn.disabled = sel.length !== 1;
     box.append(discBtn);
     const hint = el('span', 'action-hint');
-    hint.textContent = sel.length === 1
-      ? (target >= 0
-          ? 'Add to Meld puts this card on a highlighted meld — or click/drag it there. Double-click to discard.'
-          : 'This card fits no table meld. Select 3+ to lay a meld, or discard.')
-      : 'Select 3+ cards to lay a meld, or 1 card to add to a meld / discard.';
+    hint.textContent = meldUsed
+      ? 'One meld per turn — you can still add cards to melds on the table, then discard.'
+      : (sel.length === 1
+        ? (target >= 0
+            ? 'Add to Meld puts this card on a highlighted meld — or click/drag it there. Double-click to discard.'
+            : 'This card fits no table meld. Select 3+ to lay a meld, or discard.')
+        : 'Select 3+ cards to lay a meld, or 1 card to add to a meld / discard.');
     box.append(hint);
   } else if (s.phase === 'roundEnd') {
     box.append(btn('Next hand', '', () => send({ type: 'nextHand' })));
@@ -1221,7 +1227,8 @@ function renderRummyResults(s, panel) {
     else title = 'Hand blocked — a draw (tie on count)';
   }
   const rows = s.results.map(r => {
-    const tag = r.went_out ? ' <span class="badge">went out 👑</span>'
+    const tag = (r.went_out && r.rummy) ? ' <span class="badge">rummy — doubled 👑</span>'
+      : r.went_out ? ' <span class="badge">went out 👑</span>'
       : (r.blocked ? ' <span class="badge">blocked win 👑</span>' : '');
     const leftover = (r.hand && r.hand.length) ? `<div class="meld-group deadwood-group">${miniCardsHTML(r.hand)}</div>` : '—';
     return `<tr><td>${esc(r.username)}${tag}</td><td>${leftover}</td><td>+${r.points}</td><td class="total">${scoreOf(s, r.user_id)}</td></tr>`;

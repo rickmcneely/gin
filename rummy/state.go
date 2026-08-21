@@ -63,6 +63,8 @@ func (g *RummyGame) StateFor(userID int) map[string]interface{} {
 		"discard_top":  dtop,
 		"players":      players,
 		"table":        table,
+		// Only one meld may be laid down per turn; lay-offs are unlimited.
+		"melded_this_turn": g.meldedTurn,
 	}
 
 	if idx := g.playerIndex(userID); idx >= 0 {

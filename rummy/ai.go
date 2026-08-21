@@ -33,13 +33,13 @@ func (g *RummyGame) RobotStep() (actorID int, actorName string, verbs []string, 
 	if meld, ok := g.robotNextMeld(idx); ok {
 		cards, wentOut, err := g.Meld(actorID, gr.Codes(meld))
 		if err == nil {
-			return actorID, actorName, outVerbs("laid down "+describeMeld(cards), wentOut), true
+			return actorID, actorName, g.outVerbs("laid down "+describeMeld(cards), wentOut), true
 		}
 	}
 	if code, mi, ok := g.robotNextLayoff(idx); ok {
 		card, wentOut, err := g.Layoff(actorID, code, mi)
 		if err == nil {
-			return actorID, actorName, outVerbs("laid off the "+card.Name(), wentOut), true
+			return actorID, actorName, g.outVerbs("laid off the "+card.Name(), wentOut), true
 		}
 	}
 	code := g.robotDiscardChoice(idx)
@@ -47,7 +47,7 @@ func (g *RummyGame) RobotStep() (actorID int, actorName string, verbs []string, 
 	if err != nil {
 		return actorID, actorName, nil, false
 	}
-	return actorID, actorName, outVerbs("discarded the "+card.Name(), wentOut), true
+	return actorID, actorName, g.outVerbs("discarded the "+card.Name(), wentOut), true
 }
 
 // robotWantsDiscard reports whether taking the discard top helps the robot —
@@ -98,10 +98,19 @@ func (g *RummyGame) robotNextLayoff(idx int) (code string, meldIdx int, ok bool)
 // robotDiscardChoice picks the highest-value unmatched card to discard.
 func (g *RummyGame) robotDiscardChoice(idx int) string {
 	hand := g.Players[idx].Hand
-	unmatched := gr.Analyze(hand).Unmatched
-	pool := unmatched
+	// The card just taken from the discard pile cannot go straight back.
+	legal := func(cs []gr.Card) []gr.Card {
+		var out []gr.Card
+		for _, c := range cs {
+			if !g.tookDiscard || c != g.taken {
+				out = append(out, c)
+			}
+		}
+		return out
+	}
+	pool := legal(gr.Analyze(hand).Unmatched)
 	if len(pool) == 0 {
-		pool = hand
+		pool = legal(hand)
 	}
 	best := pool[0]
 	for _, c := range pool[1:] {

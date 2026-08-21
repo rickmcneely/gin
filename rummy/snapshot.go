@@ -27,6 +27,7 @@ type resultSnap struct {
 	Blocked   bool     `json:"blocked"`
 	Remaining int      `json:"remaining"`
 	Points    int      `json:"points"`
+	Rummy     bool     `json:"rummy"`
 	HandCodes []string `json:"hand"`
 }
 
@@ -45,6 +46,11 @@ type gameSnap struct {
 	WinnerID    int          `json:"winner_id"`
 	Progressed  bool         `json:"progressed"`
 	Reshuffles  int          `json:"reshuffles"`
+	MeldedTurn  bool         `json:"melded_turn"`
+	LaidTurn    bool         `json:"laid_turn"`
+	LaidBefore  []int        `json:"laid_before"`
+	Taken       gr.Card      `json:"taken"`
+	TookDiscard bool         `json:"took_discard"`
 	LastResults []resultSnap `json:"last_results"`
 }
 
@@ -54,6 +60,12 @@ func (g *RummyGame) Snapshot() ([]byte, error) {
 		ID: g.ID, Stock: g.Stock, Discard: g.DiscardPile, Turn: g.Turn, Phase: g.Phase,
 		HandNumber: g.HandNumber, DealerIdx: g.DealerIdx, TargetScore: g.TargetScore,
 		HandSize: g.HandSize, WinnerID: g.WinnerID, Progressed: g.progressed, Reshuffles: g.reshuffles,
+		MeldedTurn: g.meldedTurn, LaidTurn: g.laidTurn, Taken: g.taken, TookDiscard: g.tookDiscard,
+	}
+	for uid, laid := range g.laidBefore {
+		if laid {
+			s.LaidBefore = append(s.LaidBefore, uid)
+		}
 	}
 	for _, p := range g.Players {
 		s.Players = append(s.Players, playerSnap{p.UserID, p.Username, p.IsRobot, p.Hand, p.Score})
@@ -64,7 +76,7 @@ func (g *RummyGame) Snapshot() ([]byte, error) {
 	for _, r := range g.LastResults {
 		s.LastResults = append(s.LastResults, resultSnap{
 			UserID: r.UserID, Username: r.Username, WentOut: r.WentOut, Blocked: r.Blocked,
-			Remaining: r.Remaining, Points: r.Points, HandCodes: r.HandCodes,
+			Remaining: r.Remaining, Rummy: r.Rummy, Points: r.Points, HandCodes: r.HandCodes,
 		})
 	}
 	return json.Marshal(s)
@@ -80,6 +92,11 @@ func LoadGame(data []byte) (*RummyGame, error) {
 		ID: s.ID, Stock: s.Stock, DiscardPile: s.Discard, Turn: s.Turn, Phase: s.Phase,
 		HandNumber: s.HandNumber, DealerIdx: s.DealerIdx, TargetScore: s.TargetScore,
 		HandSize: s.HandSize, WinnerID: s.WinnerID, progressed: s.Progressed, reshuffles: s.Reshuffles,
+		meldedTurn: s.MeldedTurn, laidTurn: s.LaidTurn, taken: s.Taken, tookDiscard: s.TookDiscard,
+		laidBefore: map[int]bool{},
+	}
+	for _, uid := range s.LaidBefore {
+		g.laidBefore[uid] = true
 	}
 	for _, p := range s.Players {
 		g.Players = append(g.Players, &gr.Player{
@@ -92,7 +109,7 @@ func LoadGame(data []byte) (*RummyGame, error) {
 	for _, r := range s.LastResults {
 		g.LastResults = append(g.LastResults, HandResult{
 			UserID: r.UserID, Username: r.Username, WentOut: r.WentOut, Blocked: r.Blocked,
-			Remaining: r.Remaining, Points: r.Points, HandCodes: r.HandCodes,
+			Remaining: r.Remaining, Rummy: r.Rummy, Points: r.Points, HandCodes: r.HandCodes,
 		})
 	}
 	return g, nil

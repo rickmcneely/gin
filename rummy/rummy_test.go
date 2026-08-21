@@ -89,19 +89,25 @@ func TestRemovePlayerRedealsOrCancels(t *testing.T) {
 	}
 }
 
-func TestDealGivesSevenEach(t *testing.T) {
-	for n := 2; n <= 4; n++ {
+func TestDealSizeFollowsThePlayerCount(t *testing.T) {
+	// Ten cards head to head, seven for three or four, six for five or six.
+	sizes := map[int]int{2: 10, 3: 7, 4: 7, 5: 6, 6: 6}
+	for n := 2; n <= 6; n++ {
 		players := make([]*gr.Player, n)
 		for i := range players {
 			players[i] = &gr.Player{UserID: i + 1, Username: "p"}
 		}
 		g := NewGame(1, players, 100)
+		size := sizes[n]
+		if g.HandSize != size {
+			t.Fatalf("%d players: hand size = %d, want %d", n, g.HandSize, size)
+		}
 		for i, p := range g.Players {
-			if len(p.Hand) != 7 {
-				t.Fatalf("%d players: seat %d got %d cards, want 7", n, i, len(p.Hand))
+			if len(p.Hand) != size {
+				t.Fatalf("%d players: seat %d got %d cards, want %d", n, i, len(p.Hand), size)
 			}
 		}
-		want := 52 - 7*n - 1
+		want := 52 - size*n - 1
 		if len(g.Stock) != want {
 			t.Fatalf("%d players: stock=%d, want %d", n, len(g.Stock), want)
 		}
@@ -137,8 +143,13 @@ func TestMeldLayoffAndGoOut(t *testing.T) {
 	if g.Phase != PhaseRoundEnd {
 		t.Fatalf("phase=%s, want roundEnd", g.Phase)
 	}
-	if g.Players[0].Score != 26 {
-		t.Fatalf("winner score=%d, want 26", g.Players[0].Score)
+	// A melded and went out in the same turn, having laid nothing down before:
+	// that is a rummy, so the 26 points double.
+	if g.Players[0].Score != 52 {
+		t.Fatalf("winner score=%d, want 52 (26 doubled for going rummy)", g.Players[0].Score)
+	}
+	if !g.LastResults[0].Rummy {
+		t.Error("going out in one turn should be flagged as a rummy")
 	}
 	if g.Table[0].Codes[0] != "2C" {
 		t.Fatalf("clubs run did not grow: %v", g.Table[0].Codes)
@@ -157,8 +168,8 @@ func TestDiscardGoOut(t *testing.T) {
 	if err != nil || !wentOut {
 		t.Fatalf("Discard last card: card=%s wentOut=%v err=%v", card.Code(), wentOut, err)
 	}
-	if g.Players[0].Score != 5 {
-		t.Fatalf("winner score=%d, want 5", g.Players[0].Score)
+	if g.Players[0].Score != 10 {
+		t.Fatalf("winner score=%d, want 10 (5 doubled for going rummy)", g.Players[0].Score)
 	}
 }
 
@@ -198,8 +209,8 @@ func TestScoreSumsOverMultipleHands(t *testing.T) {
 	g.Players[0].Hand = nil
 	g.Players[1].Hand = parse("KD", "KS")
 	g.goOut(0)
-	if g.Players[0].Score != 20 {
-		t.Fatalf("after hand 1 score=%d, want 20", g.Players[0].Score)
+	if g.Players[0].Score != 40 {
+		t.Fatalf("after hand 1 score=%d, want 40 (20 doubled for going rummy)", g.Players[0].Score)
 	}
 	g.Phase = PhaseRoundEnd
 	if err := g.NextHand(); err != nil {
@@ -210,8 +221,8 @@ func TestScoreSumsOverMultipleHands(t *testing.T) {
 	g.Players[1].Hand = parse("5C", "6C")
 	g.Turn = 0
 	g.goOut(0)
-	if g.Players[0].Score != 31 {
-		t.Fatalf("after hand 2 cumulative score=%d, want 31 (20+11)", g.Players[0].Score)
+	if g.Players[0].Score != 62 {
+		t.Fatalf("after hand 2 cumulative score=%d, want 62 (40+22)", g.Players[0].Score)
 	}
 }
 

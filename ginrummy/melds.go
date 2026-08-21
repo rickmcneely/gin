@@ -1,6 +1,9 @@
 package ginrummy
 
-import "sort"
+import (
+	"sort"
+	"strconv"
+)
 
 // Meld is a set (3-4 same rank) or run (3+ consecutive, same suit) of cards.
 type Meld struct {
@@ -211,33 +214,89 @@ func canLayOff(m Meld, c Card) ([]Card, bool) {
 	return nil, false
 }
 
-// LayOff greedily lays off deadwood cards onto the given melds (the knocker's
-// melds during scoring), returning the reduced deadwood total and the cards
-// that were laid off. Highest-value deadwood is laid off first.
+// LayOff lays the given deadwood onto the melds (the knocker's melds, during
+// scoring) in the arrangement that removes the most points, returning the
+// reduced deadwood total and the cards laid off. It searches rather than being
+// greedy: spending a card on one meld can block another card, so taking the
+// highest-value lay-off first is not always best. With the knocker melding
+// 7C 7D 7S and 4H 5H 6H, an opponent holding 7H and 8H must put the 7H on the
+// run — 7H on the set strands the 8H for 8 points of deadwood that the rules
+// allow them to shed.
 func LayOff(deadwood []Card, melds []Meld) (remaining int, laidOff []Card) {
 	dw := append([]Card{}, deadwood...)
-	sort.Slice(dw, func(a, b int) bool { return dw[a].Value() > dw[b].Value() })
-	work := make([]Meld, len(melds))
-	copy(work, melds)
+	sortCards(dw)
+	total := 0
+	for _, c := range dw {
+		total += c.Value()
+	}
+	if len(dw) == 0 || len(melds) == 0 {
+		return total, nil
+	}
 
-	changed := true
-	for changed {
-		changed = false
-		for i := 0; i < len(dw); i++ {
+	// work holds the melds as they grow during the search; kinds is fixed.
+	work := make([][]Card, len(melds))
+	kinds := make([]string, len(melds))
+	for i, m := range melds {
+		work[i] = append([]Card{}, m.Cards...)
+		kinds[i] = m.Kind
+	}
+
+	avail := uint32(0)
+	for i := range dw {
+		avail |= 1 << uint(i)
+	}
+
+	bestVal := 0
+	var bestPicks, cur []Card
+	// seen prunes a state already explored having shed at least as much: the
+	// remaining cards plus the current meld shapes fully determine the future.
+	seen := map[string]int{}
+
+	var rec func(avail uint32, val int)
+	rec = func(avail uint32, val int) {
+		if val > bestVal {
+			bestVal = val
+			bestPicks = append([]Card{}, cur...)
+		}
+		k := layoffStateKey(avail, work)
+		if prev, ok := seen[k]; ok && prev >= val {
+			return
+		}
+		seen[k] = val
+		for i := range dw {
+			if avail&(1<<uint(i)) == 0 {
+				continue
+			}
 			for mi := range work {
-				if grown, ok := canLayOff(work[mi], dw[i]); ok {
-					work[mi].Cards = grown
-					laidOff = append(laidOff, dw[i])
-					dw = append(dw[:i], dw[i+1:]...)
-					i--
-					changed = true
-					break
+				grown, ok := canLayOff(Meld{Kind: kinds[mi], Cards: work[mi]}, dw[i])
+				if !ok {
+					continue
 				}
+				before := work[mi]
+				work[mi] = grown
+				cur = append(cur, dw[i])
+				rec(avail&^(1<<uint(i)), val+dw[i].Value())
+				cur = cur[:len(cur)-1]
+				work[mi] = before
 			}
 		}
 	}
-	for _, c := range dw {
-		remaining += c.Value()
+	rec(avail, 0)
+
+	return total - bestVal, bestPicks
+}
+
+// layoffStateKey identifies a search state: which deadwood is still in hand,
+// and how the melds have grown so far.
+func layoffStateKey(avail uint32, work [][]Card) string {
+	var b []byte
+	b = strconv.AppendUint(b, uint64(avail), 36)
+	for _, m := range work {
+		b = append(b, '|')
+		for _, c := range m {
+			b = strconv.AppendInt(b, int64(c), 36)
+			b = append(b, ',')
+		}
 	}
-	return remaining, laidOff
+	return string(b)
 }

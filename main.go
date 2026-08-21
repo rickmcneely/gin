@@ -71,7 +71,11 @@ func main() {
 	}
 
 	log.Printf("Gin Rummy server listening on %s (db: %s)", addr, dbPath)
-	log.Printf("Default admin login: admin / gin2024")
+	if os.Getenv("ADMIN_PASSWORD") == "" {
+		// Only true when the admin account fell back to the built-in default;
+		// printing it regardless advertised a password that was not in use.
+		log.Printf("Default admin login: admin / gin2024")
+	}
 	if err := http.ListenAndServe(addr, r); err != nil {
 		log.Fatal(err)
 	}

@@ -105,6 +105,22 @@ func (g *Game) Apply(userID int, a Action) ([]string, error) {
 		}
 		return []string{"drew from the stock"}, nil
 
+	case "takeUpcard":
+		c, err := g.TakeUpcard(userID)
+		if err != nil {
+			return nil, errors.New(friendlyUpcardErr(err))
+		}
+		return []string{"took the " + c.Name() + " as the upcard"}, nil
+
+	case "passUpcard":
+		if err := g.PassUpcard(userID); err != nil {
+			return nil, errors.New(friendlyUpcardErr(err))
+		}
+		if g.Phase == PhaseDraw {
+			return []string{"passed the upcard — nobody wanted it"}, nil
+		}
+		return []string{"passed the upcard"}, nil
+
 	case "discard":
 		card, perr := ParseCard(a.Card)
 		if perr != nil {
@@ -148,8 +164,22 @@ func (g *Game) RobotStep() (actorID int, actorName string, verbs []string, acted
 	idx := g.Turn
 	actorID, actorName = cp.UserID, cp.Username
 
+	if g.Phase == PhaseUpcard {
+		if g.DecideDraw(idx) {
+			c, err := g.TakeUpcard(actorID)
+			if err != nil {
+				return actorID, actorName, nil, false
+			}
+			return actorID, actorName, []string{"took the " + c.Name() + " as the upcard"}, true
+		}
+		if err := g.PassUpcard(actorID); err != nil {
+			return actorID, actorName, nil, false
+		}
+		return actorID, actorName, []string{"passed the upcard"}, true
+	}
+
 	if g.Phase == PhaseDraw {
-		from := g.DecideDraw(idx)
+		from := g.DecideDraw(idx) && !g.StockOnly
 		c, err := g.Draw(actorID, from)
 		if err != nil {
 			// Stock exhausted: the hand washed out. Report it so the UI updates.
@@ -181,12 +211,26 @@ func knockVerb(g *Game, userID int) string {
 	return "knocked"
 }
 
+func friendlyUpcardErr(err error) string {
+	switch {
+	case errors.Is(err, ErrNotYourTurn):
+		return "The upcard isn't being offered to you yet."
+	case errors.Is(err, ErrWrongPhase):
+		return "The upcard has already been settled — draw from the stock or the discard."
+	case errors.Is(err, ErrEmptyDiscard):
+		return "There's no upcard to take."
+	}
+	return err.Error()
+}
+
 func friendlyDrawErr(err error) string {
 	switch {
 	case errors.Is(err, ErrWrongPhase):
 		return "You've already drawn this turn — now choose a card to discard."
 	case errors.Is(err, ErrNotYourTurn):
 		return "It's not your turn yet — wait for the other players to act."
+	case errors.Is(err, ErrMustDrawStock):
+		return "Everyone passed the upcard, so this draw has to come from the stock."
 	case errors.Is(err, ErrEmptyDiscard):
 		return "The discard pile is empty — draw from the stock instead."
 	case errors.Is(err, ErrEmptyStock):
@@ -206,6 +250,8 @@ func friendlyDiscardErr(err error) string {
 		return "You don't have that card in your hand."
 	case errors.Is(err, ErrCannotKnock):
 		return "You can't knock — your deadwood must be 10 or less. Uncheck Knock and discard normally."
+	case errors.Is(err, ErrNoRedis):
+		return "You can't discard the card you just took from the discard pile — play a different one."
 	default:
 		return capitalizeErr(err)
 	}

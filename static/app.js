@@ -820,6 +820,11 @@ function canDrawNow() {
   return lastState && lastState.turn_user_id === ME.id && lastState.phase === 'draw';
 }
 
+// canTakeUpcard is the opening offer: this player may take the face-up card.
+function canTakeUpcard() {
+  return lastState && lastState.turn_user_id === ME.id && lastState.phase === 'upcard';
+}
+
 const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // flipHand animates each hand card from its previous position to its new one
@@ -961,16 +966,23 @@ function renderGinActions(s, myTurn) {
   const box = $('actions');
   box.innerHTML = '';
   if (!myTurn) {
-    if (s.phase === 'draw' || s.phase === 'discard') {
+    if (s.phase === 'upcard' || s.phase === 'draw' || s.phase === 'discard') {
       const who = s.players.find(p => p.is_turn);
       box.innerHTML = `<span style="color:#fff">Waiting for ${who ? esc(who.username) : '…'}</span>`;
     }
     if (s.phase === 'roundEnd') box.append(btn('Next hand', '', () => send({ type: 'nextHand' })));
     return;
   }
-  if (s.phase === 'draw') {
+  if (s.phase === 'upcard') {
+    // Opening: the upcard is offered round the table before anyone draws.
+    box.append(btn(`Take ${pretty(s.discard_top)}`, '', () => send({ type: 'takeUpcard' })));
+    box.append(btn('Pass', '', () => send({ type: 'passUpcard' })));
+  } else if (s.phase === 'draw') {
     box.append(btn('Draw from stock', '', () => send({ type: 'draw', from: 'stock' })));
-    if (s.discard_top) box.append(btn(`Take ${pretty(s.discard_top)}`, '', () => send({ type: 'draw', from: 'discard' })));
+    // Nobody took the upcard, so this draw has to come from the stock.
+    if (s.discard_top && !s.must_draw_stock) {
+      box.append(btn(`Take ${pretty(s.discard_top)}`, '', () => send({ type: 'draw', from: 'discard' })));
+    }
   } else if (s.phase === 'discard') {
     const canKnock = s.your_analysis && s.your_analysis.can_knock;
     const knockLabel = el('label');
@@ -1271,7 +1283,11 @@ $('stock-pile').addEventListener('click', () => {
   if (canDrawNow()) send({ type: 'draw', from: 'stock' });
 });
 $('discard-pile').addEventListener('click', () => {
-  if (canDrawNow() && lastState.discard_top) send({ type: 'draw', from: 'discard' });
+  if (canTakeUpcard() && lastState.discard_top) { send({ type: 'takeUpcard' }); return; }
+  // The upcard passed round untaken, so the pile is closed for this draw.
+  if (canDrawNow() && lastState.discard_top && !lastState.must_draw_stock) {
+    send({ type: 'draw', from: 'discard' });
+  }
 });
 $('clear-log').addEventListener('click', () => { $('log-entries').innerHTML = ''; });
 
@@ -1304,7 +1320,9 @@ function focusables() {
   document.querySelectorAll('#your-hand .card').forEach(el => list.push(el));
   if (canDrawNow()) {
     list.push($('stock-pile'));
-    if (lastState && lastState.discard_top) list.push($('discard-pile'));
+    if (lastState && lastState.discard_top && !lastState.must_draw_stock) list.push($('discard-pile'));
+  } else if (canTakeUpcard() && lastState.discard_top) {
+    list.push($('discard-pile'));
   }
   document.querySelectorAll('#table-melds .table-meld.layoff-ready').forEach(el => list.push(el));
   document.querySelectorAll('#actions button:not(:disabled), #actions input[type=checkbox]:not(:disabled)')

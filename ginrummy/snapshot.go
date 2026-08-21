@@ -20,6 +20,7 @@ type resultSnap struct {
 	Gin       bool       `json:"gin"`
 	Undercut  bool       `json:"undercut"`
 	HandCodes []string   `json:"hand"`
+	LaidOff   []string   `json:"laid_off"`
 }
 
 type playerSnap struct {
@@ -43,6 +44,11 @@ type gameSnap struct {
 	HandSize     int          `json:"hand_size"`
 	WinnerID     int          `json:"winner_id"`
 	LastDrawFrom string       `json:"last_draw_from"`
+	UpcardPasses int          `json:"upcard_passes"`
+	StockOnly    bool         `json:"stock_only"`
+	TakenCard    Card         `json:"taken_card"`
+	TakenValid   bool         `json:"taken_valid"`
+	Washed       bool         `json:"washed"`
 	LastResults  []resultSnap `json:"last_results"`
 }
 
@@ -52,6 +58,8 @@ func (g *Game) Snapshot() ([]byte, error) {
 		ID: g.ID, Stock: g.Stock, Discard: g.DiscardPile, Turn: g.Turn, Phase: g.Phase,
 		HandNumber: g.HandNumber, DealerIdx: g.DealerIdx, TargetScore: g.TargetScore,
 		HandSize: g.HandSize, WinnerID: g.WinnerID, LastDrawFrom: g.LastDrawFrom,
+		UpcardPasses: g.UpcardPasses, StockOnly: g.StockOnly,
+		TakenCard: g.TakenCard, TakenValid: g.TakenValid, Washed: g.Washed,
 	}
 	for _, p := range g.Players {
 		s.Players = append(s.Players, playerSnap{p.UserID, p.Username, p.IsRobot, p.Hand, p.Score})
@@ -60,6 +68,7 @@ func (g *Game) Snapshot() ([]byte, error) {
 		rs := resultSnap{
 			UserID: r.UserID, Username: r.Username, Deadwood: r.Deadwood, Points: r.Points,
 			IsKnocker: r.IsKnocker, Gin: r.Gin, Undercut: r.Undercut, HandCodes: r.HandCodes,
+			LaidOff: r.LaidOff,
 		}
 		for _, m := range r.Melds {
 			rs.Melds = append(rs.Melds, meldSnap{m.Kind, m.Cards})
@@ -79,6 +88,8 @@ func LoadGame(data []byte) (*Game, error) {
 		ID: s.ID, Stock: s.Stock, DiscardPile: s.Discard, Turn: s.Turn, Phase: s.Phase,
 		HandNumber: s.HandNumber, DealerIdx: s.DealerIdx, TargetScore: s.TargetScore,
 		HandSize: s.HandSize, WinnerID: s.WinnerID, LastDrawFrom: s.LastDrawFrom,
+		UpcardPasses: s.UpcardPasses, StockOnly: s.StockOnly,
+		TakenCard: s.TakenCard, TakenValid: s.TakenValid, Washed: s.Washed,
 	}
 	for _, p := range s.Players {
 		g.Players = append(g.Players, &Player{
@@ -89,6 +100,7 @@ func LoadGame(data []byte) (*Game, error) {
 		hr := HandResult{
 			UserID: r.UserID, Username: r.Username, Deadwood: r.Deadwood, Points: r.Points,
 			IsKnocker: r.IsKnocker, Gin: r.Gin, Undercut: r.Undercut, HandCodes: r.HandCodes,
+			LaidOff: r.LaidOff,
 		}
 		for _, m := range r.Melds {
 			hr.Melds = append(hr.Melds, Meld{Kind: m.Kind, Cards: m.Cards, Codes: codes(m.Cards)})

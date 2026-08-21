@@ -6,6 +6,7 @@ import (
 )
 
 const (
+	PhaseUpcard   = "upcard"   // opening: current player may take the face-up card or pass
 	PhaseDraw     = "draw"     // current player must draw
 	PhaseDiscard  = "discard"  // current player must discard (and may knock)
 	PhaseRoundEnd = "roundEnd" // hand finished, results available
@@ -14,6 +15,11 @@ const (
 
 const KnockThreshold = 10
 
+// StockFloor is how many cards must remain in the stock for play to continue:
+// when a player discards without knocking and only this many are left, the hand
+// is cancelled and dealt again by the same dealer.
+const StockFloor = 2
+
 var (
 	ErrNotYourTurn  = errors.New("it's not your turn yet — wait for the other players to act")
 	ErrWrongPhase   = errors.New("you can't do that right now")
@@ -21,6 +27,8 @@ var (
 	ErrNoCard       = errors.New("you don't have that card in your hand")
 	ErrCannotKnock  = errors.New("you can't knock — your deadwood must be 10 or less")
 	ErrEmptyDiscard = errors.New("the discard pile is empty — draw from the stock instead")
+	ErrMustDrawStock = errors.New("the upcard was passed round, so this draw must come from the stock")
+	ErrNoRedis       = errors.New("you can't discard the card you just took from the discard pile")
 )
 
 // Player is a seat at the table.
@@ -62,6 +70,11 @@ type Game struct {
 	WinnerID    int       `json:"winner_id"` // 0 until game over
 	LastResults []HandResult `json:"-"`
 	LastDrawFrom string   `json:"-"` // "stock" or "discard" of the most recent draw, for UI hints
+	UpcardPasses int      `json:"-"` // how many players have declined the opening upcard
+	StockOnly    bool     `json:"-"` // the upcard went round untaken: this draw must be from the stock
+	TakenCard    Card     `json:"-"` // card taken from the discard this turn — it cannot be discarded back
+	TakenValid   bool     `json:"-"`
+	Washed       bool     `json:"-"` // the last hand was cancelled, so the same dealer deals again
 	mu          sync.Mutex
 }
 
@@ -105,10 +118,63 @@ func (g *Game) deal() {
 	g.DiscardPile = []Card{deck[pos]}
 	pos++
 	g.Stock = deck[pos:]
-	g.Turn = (g.DealerIdx + 1) % len(g.Players) // player left of dealer starts
-	g.Phase = PhaseDraw
+	g.Turn = (g.DealerIdx + 1) % len(g.Players) // the eldest hand is offered the upcard first
+	g.Phase = PhaseUpcard
 	g.HandNumber++
 	g.LastDrawFrom = ""
+	g.UpcardPasses = 0
+	g.StockOnly = false
+	g.clearTaken()
+}
+
+// clearTaken forgets the card taken from the discard pile, which is only barred
+// from being discarded during the turn it was taken.
+func (g *Game) clearTaken() {
+	g.TakenCard, g.TakenValid = 0, false
+}
+
+// TakeUpcard is the opening option: the player being offered the face-up card
+// takes it into their hand and continues the turn by discarding.
+func (g *Game) TakeUpcard(userID int) (Card, error) {
+	if g.playerIndex(userID) != g.Turn {
+		return 0, ErrNotYourTurn
+	}
+	if g.Phase != PhaseUpcard {
+		return 0, ErrWrongPhase
+	}
+	if len(g.DiscardPile) == 0 {
+		return 0, ErrEmptyDiscard
+	}
+	c := g.DiscardPile[len(g.DiscardPile)-1]
+	g.DiscardPile = g.DiscardPile[:len(g.DiscardPile)-1]
+	p := g.Players[g.Turn]
+	p.Hand = append(p.Hand, c)
+	sortCards(p.Hand)
+	g.TakenCard, g.TakenValid = c, true
+	g.LastDrawFrom = "discard"
+	g.Phase = PhaseDiscard
+	return c, nil
+}
+
+// PassUpcard declines the opening upcard and offers it to the next player. Once
+// everyone has passed, the eldest hand draws from the stock to start the hand.
+func (g *Game) PassUpcard(userID int) error {
+	if g.playerIndex(userID) != g.Turn {
+		return ErrNotYourTurn
+	}
+	if g.Phase != PhaseUpcard {
+		return ErrWrongPhase
+	}
+	g.UpcardPasses++
+	if g.UpcardPasses >= len(g.Players) {
+		// Nobody wanted it: the eldest hand starts by drawing from the stock.
+		g.Turn = (g.DealerIdx + 1) % len(g.Players)
+		g.Phase = PhaseDraw
+		g.StockOnly = true
+		return nil
+	}
+	g.Turn = (g.Turn + 1) % len(g.Players)
+	return nil
 }
 
 func (g *Game) playerIndex(userID int) int {
@@ -122,7 +188,7 @@ func (g *Game) playerIndex(userID int) int {
 
 // CurrentPlayer returns the player whose turn it is (nil if round/game over).
 func (g *Game) CurrentPlayer() *Player {
-	if g.Phase != PhaseDraw && g.Phase != PhaseDiscard {
+	if g.Phase != PhaseUpcard && g.Phase != PhaseDraw && g.Phase != PhaseDiscard {
 		return nil
 	}
 	return g.Players[g.Turn]
@@ -140,12 +206,16 @@ func (g *Game) Draw(userID int, fromDiscard bool) (Card, error) {
 	p := g.Players[idx]
 	var c Card
 	if fromDiscard {
+		if g.StockOnly {
+			return 0, ErrMustDrawStock
+		}
 		if len(g.DiscardPile) == 0 {
 			return 0, ErrEmptyDiscard
 		}
 		c = g.DiscardPile[len(g.DiscardPile)-1]
 		g.DiscardPile = g.DiscardPile[:len(g.DiscardPile)-1]
 		g.LastDrawFrom = "discard"
+		g.TakenCard, g.TakenValid = c, true
 	} else {
 		if len(g.Stock) == 0 {
 			// Stock exhausted with no knock: the hand is a draw.
@@ -155,7 +225,9 @@ func (g *Game) Draw(userID int, fromDiscard bool) (Card, error) {
 		c = g.Stock[len(g.Stock)-1]
 		g.Stock = g.Stock[:len(g.Stock)-1]
 		g.LastDrawFrom = "stock"
+		g.clearTaken()
 	}
+	g.StockOnly = false
 	p.Hand = append(p.Hand, c)
 	sortCards(p.Hand)
 	g.Phase = PhaseDiscard
@@ -183,6 +255,9 @@ func (g *Game) Discard(userID int, card Card, knock bool) error {
 	if pos < 0 {
 		return ErrNoCard
 	}
+	if g.TakenValid && card == g.TakenCard {
+		return ErrNoRedis
+	}
 
 	if knock {
 		// Evaluate the hand WITHOUT the discard.
@@ -203,6 +278,14 @@ func (g *Game) Discard(userID int, card Card, knock bool) error {
 		return nil
 	}
 
+	g.clearTaken()
+
+	// The hand dies once the stock is down to its floor and nobody has knocked.
+	if len(g.Stock) <= StockFloor {
+		g.endHandWashed()
+		return nil
+	}
+
 	// Advance to the next player.
 	g.Turn = (g.Turn + 1) % len(g.Players)
 	g.Phase = PhaseDraw
@@ -211,6 +294,7 @@ func (g *Game) Discard(userID int, card Card, knock bool) error {
 }
 
 func (g *Game) endHandWashed() {
+	g.Washed = true
 	g.LastResults = nil
 	for _, p := range g.Players {
 		a := Analyze(p.Hand)
@@ -225,6 +309,7 @@ func (g *Game) endHandWashed() {
 
 // scoreHand computes results for a knock/gin by player at knockerIdx.
 func (g *Game) scoreHand(knockerIdx int) {
+	g.Washed = false
 	knocker := g.Players[knockerIdx]
 	ka := Analyze(knocker.Hand)
 	gin := ka.Deadwood == 0
@@ -306,9 +391,29 @@ func (g *Game) NextHand() error {
 	if g.Phase != PhaseRoundEnd {
 		return ErrWrongPhase
 	}
-	g.DealerIdx = (g.DealerIdx + 1) % len(g.Players)
+	// The winner of a hand deals the next one; a cancelled hand is dealt again
+	// by the same dealer.
+	if !g.Washed {
+		if w := g.lastHandWinner(); w >= 0 {
+			g.DealerIdx = w
+		}
+	}
 	g.deal()
 	return nil
+}
+
+// lastHandWinner is the index of the player who scored the most points in the
+// hand just finished, or -1 if nobody scored.
+func (g *Game) lastHandWinner() int {
+	best, idx := 0, -1
+	for _, r := range g.LastResults {
+		if r.Points > best {
+			if i := g.playerIndex(r.UserID); i >= 0 {
+				best, idx = r.Points, i
+			}
+		}
+	}
+	return idx
 }
 
 // DiscardTop returns the current top discard card and whether one exists.

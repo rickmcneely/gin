@@ -220,7 +220,7 @@ func (s *Server) ListGames(w http.ResponseWriter, r *http.Request) {
 
 // wsMessage is an action sent by a client over the WebSocket.
 type wsMessage struct {
-	Type    string   `json:"type"`     // draw | discard | nextHand | meld | layoff | offerDraw | chat
+	Type    string   `json:"type"`     // takeUpcard | passUpcard | draw | discard | nextHand | meld | layoff | offerDraw | chat
 	From    string   `json:"from"`     // for draw: "stock" | "discard"
 	Card    string   `json:"card"`     // for discard / layoff
 	Knock   bool     `json:"knock"`    // gin only

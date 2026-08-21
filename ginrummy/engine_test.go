@@ -81,11 +81,26 @@ func TestGameFlow(t *testing.T) {
 	if len(g.Stock) != 31 {
 		t.Fatalf("stock = %d, want 31", len(g.Stock))
 	}
-	// Player 2 starts (left of dealer 0).
-	if g.CurrentPlayer().UserID != 2 {
-		t.Fatalf("expected player 2 to start, got %d", g.CurrentPlayer().UserID)
+	// The hand opens with the upcard offered to player 2 (left of dealer 0).
+	if g.Phase != PhaseUpcard {
+		t.Fatalf("phase = %s, want the upcard offer", g.Phase)
 	}
-	// Draw from stock then discard the first card.
+	if g.CurrentPlayer().UserID != 2 {
+		t.Fatalf("expected player 2 to be offered the upcard, got %d", g.CurrentPlayer().UserID)
+	}
+	// Both pass, so player 2 opens by drawing from the stock.
+	if err := g.PassUpcard(2); err != nil {
+		t.Fatalf("pass: %v", err)
+	}
+	if err := g.PassUpcard(1); err != nil {
+		t.Fatalf("dealer pass: %v", err)
+	}
+	if g.Phase != PhaseDraw || g.CurrentPlayer().UserID != 2 {
+		t.Fatalf("after both passes: phase=%s turn=%d, want player 2 to draw", g.Phase, g.CurrentPlayer().UserID)
+	}
+	if _, err := g.Draw(2, true); err != ErrMustDrawStock {
+		t.Fatalf("taking the passed upcard should be refused, got %v", err)
+	}
 	if _, err := g.Draw(2, false); err != nil {
 		t.Fatalf("draw: %v", err)
 	}

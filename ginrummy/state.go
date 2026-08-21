@@ -24,7 +24,7 @@ func (g *Game) StateFor(userID int) map[string]interface{} {
 			Score:     p.Score,
 			HandCount: len(p.Hand),
 			Connected: p.Connected,
-			IsTurn:    (g.Phase == PhaseDraw || g.Phase == PhaseDiscard) && i == g.Turn,
+			IsTurn:    (g.Phase == PhaseUpcard || g.Phase == PhaseDraw || g.Phase == PhaseDiscard) && i == g.Turn,
 			IsDealer:  i == g.DealerIdx,
 		})
 	}
@@ -51,6 +51,8 @@ func (g *Game) StateFor(userID int) map[string]interface{} {
 		"stock_count":  len(g.Stock),
 		"discard_top":  dtop,
 		"players":      players,
+		// The upcard went round untaken, so this draw must come from the stock.
+		"must_draw_stock": g.StockOnly,
 	}
 
 	if idx := g.playerIndex(userID); idx >= 0 {

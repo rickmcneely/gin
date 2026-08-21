@@ -67,7 +67,7 @@ func TestGinRemovePlayerRedealsOrCancels(t *testing.T) {
 			t.Fatalf("re-deal should give 10 cards, got %d", len(p.Hand))
 		}
 	}
-	if g.Phase != PhaseDraw || g.Turn < 0 || g.Turn >= len(g.Players) {
+	if g.Phase != PhaseUpcard || g.Turn < 0 || g.Turn >= len(g.Players) {
 		t.Fatalf("bad post-redeal state: phase=%s turn=%d", g.Phase, g.Turn)
 	}
 	if remaining, removed = g.RemovePlayer(1); !removed || remaining != 1 {

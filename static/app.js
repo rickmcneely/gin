@@ -1200,12 +1200,18 @@ function meldsHTML(r, isWinner) {
   const groups = (r.melds || []).map(m =>
     `<span class="meld-group ${m.kind}">${miniCardsHTML(m.cards)}</span>`).join('');
   const meldCards = new Set((r.melds || []).flatMap(m => m.cards || []));
-  const dead = (r.hand || []).filter(c => !meldCards.has(c));
+  // Cards laid off onto the knocker's melds are gone from the count, so they
+  // get their own group rather than sitting in the deadwood pile.
+  const laid = r.laid_off || [];
+  const laidSet = new Set(laid);
+  const laidGroup = laid.length
+    ? `<span class="meld-group laidoff-group" title="Laid off on the knocker's melds">${miniCardsHTML(laid)}</span>` : '';
+  const dead = (r.hand || []).filter(c => !meldCards.has(c) && !laidSet.has(c));
   const deadGroup = dead.length
     ? `<span class="meld-group deadwood-group" title="Deadwood">${miniCardsHTML(dead)}</span>` : '';
   const crown = isWinner ? '👑 ' : '';
   const cls = isWinner ? 'player-melds winner-melds' : 'player-melds';
-  return `<div class="${cls}"><span class="pm-name">${crown}${esc(r.username)}</span>${groups}${deadGroup}</div>`;
+  return `<div class="${cls}"><span class="pm-name">${crown}${esc(r.username)}</span>${groups}${laidGroup}${deadGroup}</div>`;
 }
 
 function miniCardsHTML(codes) {

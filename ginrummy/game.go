@@ -44,6 +44,7 @@ type HandResult struct {
 	Gin      bool     `json:"gin"`
 	Undercut bool     `json:"undercut"`
 	HandCodes []string `json:"hand"`
+	LaidOff  []string `json:"laid_off"` // cards shed onto the knocker's melds
 }
 
 // Game is a single gin rummy match (best-of to TargetScore).
@@ -247,9 +248,14 @@ func (g *Game) scoreHand(knockerIdx int) {
 		}
 		oppDead := results[i].Deadwood
 		if !gin {
-			// Opponents may lay off onto the knocker's melds.
-			oppDead, _ = LayOff(Analyze(p.Hand).Unmatched, ka.Melds)
+			// Opponents may lay off onto the knocker's melds, and may arrange
+			// their own hand to suit the lay-offs — the arrangement with the
+			// least deadwood on its own can strand cards they could shed.
+			oa, laid := AnalyzeWithLayOff(p.Hand, ka.Melds)
+			oppDead = oa.Deadwood
 			results[i].Deadwood = oppDead
+			results[i].Melds = oa.Melds
+			results[i].LaidOff = codes(laid)
 		}
 		if gin {
 			// Gin: knocker collects each opponent's full deadwood; no undercut.

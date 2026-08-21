@@ -249,6 +249,7 @@ button.small { padding: 6px 10px; font-size: 13px; }
   background: #e8f5e9; border: 1px solid #c8e6c9;
 }
 .meld-group.deadwood-group { background: #fdecea; border-color: #f5c6c2; opacity: 0.85; }
+.meld-group.laidoff-group { background: #eaf4ec; border-color: #bcd9c3; opacity: 0.9; }
 .mini-card {
   display: inline-block; min-width: 22px; text-align: center; padding: 3px 4px;
   background: #fff; border: 1px solid #ccc; border-radius: 4px;

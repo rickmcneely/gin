@@ -300,3 +300,88 @@ func layoffStateKey(avail uint32, work [][]Card) string {
 	}
 	return string(b)
 }
+
+// AnalyzeWithLayOff arranges a hand for the lowest deadwood when its holder may
+// also lay cards off onto targets (the knocker's melds at scoring time). It
+// picks the arrangement and the lay-offs together, because the arrangement with
+// the least deadwood on its own can strand cards a slightly worse one would
+// shed: holding 5S 5H 5D 5C 4S against a knocker's 6S 7S 8S, melding all four
+// fives leaves the 4S stranded for 4 points, while melding only three frees the
+// 5S to extend the run so the 4S follows it and nothing is left.
+//
+// The returned Analysis describes the chosen arrangement: Melds are the melds
+// kept in hand, Unmatched and Deadwood are what survives after the lay-offs,
+// and the second result is the cards laid off.
+func AnalyzeWithLayOff(hand []Card, targets []Meld) (Analysis, []Card) {
+	if len(hand) == 0 || len(targets) == 0 {
+		return Analyze(hand), nil
+	}
+	masks, kinds := generateMelds(hand)
+
+	// Walk every set of hand cards coverable by disjoint melds, keeping one
+	// arrangement per covered set. Only the arrangements that cannot take
+	// another meld are worth scoring: covering more can never leave more
+	// deadwood, since a smaller leftover can always be laid off at least as far.
+	arrangement := map[uint32][]int{0: nil}
+	queue := []uint32{0}
+	var settled []uint32
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		grew := false
+		for mi, m := range masks {
+			if m&cur != 0 {
+				continue
+			}
+			grew = true
+			next := cur | m
+			if _, seen := arrangement[next]; !seen {
+				arrangement[next] = append(append([]int{}, arrangement[cur]...), mi)
+				queue = append(queue, next)
+			}
+		}
+		if !grew {
+			settled = append(settled, cur)
+		}
+	}
+
+	bestDeadwood := -1
+	var bestCover uint32
+	var bestLaid []Card
+	for _, cover := range settled {
+		var left []Card
+		for i := range hand {
+			if cover&(1<<uint(i)) == 0 {
+				left = append(left, hand[i])
+			}
+		}
+		dw, laid := LayOff(left, targets)
+		if bestDeadwood < 0 || dw < bestDeadwood {
+			bestDeadwood, bestCover, bestLaid = dw, cover, laid
+		}
+	}
+
+	laid := map[Card]bool{}
+	for _, c := range bestLaid {
+		laid[c] = true
+	}
+	var melds []Meld
+	for _, mi := range arrangement[bestCover] {
+		var cs []Card
+		for i := range hand {
+			if masks[mi]&(1<<uint(i)) != 0 {
+				cs = append(cs, hand[i])
+			}
+		}
+		sortCards(cs)
+		melds = append(melds, Meld{Kind: kinds[mi], Cards: cs, Codes: codes(cs)})
+	}
+	var unmatched []Card
+	for i := range hand {
+		if bestCover&(1<<uint(i)) == 0 && !laid[hand[i]] {
+			unmatched = append(unmatched, hand[i])
+		}
+	}
+	sortCards(unmatched)
+	return Analysis{Deadwood: bestDeadwood, Melds: melds, Unmatched: unmatched}, bestLaid
+}

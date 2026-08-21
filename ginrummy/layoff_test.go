@@ -60,3 +60,49 @@ func TestLayOffNoMeldsOrNoDeadwood(t *testing.T) {
 		t.Errorf("no deadwood: got (%d, %v), want (0, nil)", rem, codes(laid))
 	}
 }
+
+func TestAnalyzeWithLayOffTradesAMeldForLayOffs(t *testing.T) {
+	// 5S 5H 5D 5C 4S against a knocker melding 6S 7S 8S. Melding all four fives
+	// is the best arrangement on its own (4 deadwood: the stranded 4S), but
+	// melding three frees the 5S to extend the run, and the 4S follows it.
+	hand := []Card{card(4, 3), card(4, 2), card(4, 1), card(4, 0), card(3, 3)}
+	targets := []Meld{{Kind: "run", Cards: []Card{card(5, 3), card(6, 3), card(7, 3)}}}
+
+	if base := Analyze(hand); base.Deadwood != 4 {
+		t.Fatalf("premise changed: Analyze alone gives %d deadwood, want 4", base.Deadwood)
+	}
+	a, laid := AnalyzeWithLayOff(hand, targets)
+	if a.Deadwood != 0 {
+		t.Errorf("deadwood = %d, want 0 (melds %d, laid off %v, left %v)",
+			a.Deadwood, len(a.Melds), codes(laid), codes(a.Unmatched))
+	}
+	if len(a.Melds) != 1 || len(a.Melds[0].Cards) != 3 {
+		t.Errorf("want one meld of three fives, got %d melds", len(a.Melds))
+	}
+	if len(laid) != 2 {
+		t.Errorf("laid off %v, want the 5S and the 4S", codes(laid))
+	}
+	if len(a.Unmatched) != 0 {
+		t.Errorf("unmatched = %v, want nothing left", codes(a.Unmatched))
+	}
+}
+
+func TestAnalyzeWithLayOffMatchesAnalyzeWithNothingToLayOff(t *testing.T) {
+	// KS QH 2C against melds it cannot touch: same answer as a plain Analyze.
+	hand := []Card{card(12, 3), card(11, 2), card(1, 0)}
+	targets := []Meld{{Kind: "set", Cards: []Card{card(6, 0), card(6, 1), card(6, 3)}}}
+
+	base := Analyze(hand)
+	a, laid := AnalyzeWithLayOff(hand, targets)
+	if a.Deadwood != base.Deadwood || len(laid) != 0 {
+		t.Errorf("got deadwood %d laid %v, want %d and nothing laid off", a.Deadwood, codes(laid), base.Deadwood)
+	}
+}
+
+func TestAnalyzeWithLayOffNoTargets(t *testing.T) {
+	hand := []Card{card(12, 3), card(4, 3), card(3, 3)}
+	a, laid := AnalyzeWithLayOff(hand, nil)
+	if base := Analyze(hand); a.Deadwood != base.Deadwood || laid != nil {
+		t.Errorf("got %d laid %v, want %d and nil", a.Deadwood, codes(laid), base.Deadwood)
+	}
+}
